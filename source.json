@@ -1,0 +1,18 @@
+{
+  "name": "AjisaiFlow",
+  "id": "com.ajisaiflow.vpm",
+  "url": "https://lighfu.github.io/vpm/index.json",
+  "author": {
+    "name": "AjisaiFlow",
+    "url": "https://ajisaiflow.booth.pm"
+  },
+  "description": "VPM packages by AjisaiFlow",
+  "infoLink": {
+    "url": "https://github.com/lighfu/vpm",
+    "text": "View on GitHub"
+  },
+  "githubRepos": [
+    "lighfu/vpm"
+  ],
+  "packages": []
+}

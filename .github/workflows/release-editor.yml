@@ -1,0 +1,42 @@
+name: Release Editor Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 0.2.2) — leave empty to read from package.json'
+        required: false
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            VERSION=$(jq -r '.version' Packages/com.ajisaiflow.unityagent/package.json)
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Editor zip
+        run: |
+          cd Packages
+          zip -r ../com.ajisaiflow.unityagent-${{ steps.version.outputs.version }}.zip com.ajisaiflow.unityagent/ -x "*.meta"
+
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="editor-v${{ steps.version.outputs.version }}"
+          gh release create "$TAG" \
+            --title "UnityAgent v${{ steps.version.outputs.version }}" \
+            --generate-notes \
+            "com.ajisaiflow.unityagent-${{ steps.version.outputs.version }}.zip"

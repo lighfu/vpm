@@ -1,0 +1,19 @@
+{
+  "name": "com.ajisaiflow.unityagent",
+  "displayName": "UnityAgent",
+  "version": "0.2.2",
+  "unity": "2022.3",
+  "description": "AI-powered Unity Editor agent for VRChat avatar creation. 400+ tools.",
+  "author": {
+    "name": "AjisaiFlow"
+  },
+  "license": "MIT",
+  "vpmDependencies": {
+    "com.ajisaiflow.unityagent.sdk": ">=0.2.2"
+  },
+  "legacyFolders": {
+    "Assets\\紫陽花広場\\UnityAgent\\Editor": "",
+    "Assets\\紫陽花広場\\UnityAgent\\SDK": "",
+    "Assets\\紫陽花広場\\UnityAgent\\localization": ""
+  }
+}
