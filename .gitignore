@@ -25,3 +25,4 @@ Thumbs.db
 
 # Build artifacts
 Packages/*/Build~/
+!Packages/com.ajisaiflow.unityagent/AjisaiFlow.UnityAgent.Editor.dll.meta
