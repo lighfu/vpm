@@ -57,6 +57,7 @@ jobs:
       - name: Build Dev Listing
         run: |
           cp source-dev.json source.json
+          mkdir -p $GITHUB_WORKSPACE/${{env.listPublishDirectory}}/dev
           ${{env.pathToCi}}/build.cmd BuildMultiPackageListing --root ${{env.pathToCi}} --list-publish-directory $GITHUB_WORKSPACE/${{env.listPublishDirectory}}/dev
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
