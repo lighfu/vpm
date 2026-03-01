@@ -503,5 +503,7 @@
   "腕（右）": "Arm (Right)",
   "腕（左）": "Arm (Left)",
   "腕（両側）": "Arms (Both)",
-  "閾値 (貫通率)": "Threshold (Penetration Rate)"
+  "閾値 (貫通率)": "Threshold (Penetration Rate)",
+  "ドキュメント": "Documentation",
+  "使い方や設定方法、トラブルシューティングなど、UnityAgent の詳しいドキュメントはこちら。": "Usage guides, configuration, troubleshooting and more — view the full UnityAgent documentation."
 }
