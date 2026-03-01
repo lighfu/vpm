@@ -1,7 +1,7 @@
 {
   "name": "com.ajisaiflow.unityagent.sdk",
   "displayName": "UnityAgent SDK",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "unity": "2022.3",
   "description": "SDK for creating UnityAgent tool plugins.",
   "author": {
