@@ -1,7 +1,7 @@
 {
   "name": "com.ajisaiflow.unityagent",
   "displayName": "UnityAgent",
-  "version": "0.3.0",
+  "version": "0.3.8",
   "unity": "2022.3",
   "description": "AI-powered Unity Editor agent for VRChat avatar creation. 400+ tools.",
   "author": {
@@ -9,11 +9,11 @@
   },
   "license": "MIT",
   "vpmDependencies": {
-    "com.ajisaiflow.unityagent.sdk": ">=0.3.0"
+    "com.ajisaiflow.unityagent.sdk": ">=0.3.8"
   },
   "legacyFolders": {
-    "Assets\\邏ｫ髯ｽ闃ｱ蠎・ｴ\\UnityAgent\\Editor": "",
-    "Assets\\邏ｫ髯ｽ闃ｱ蠎・ｴ\\UnityAgent\\SDK": "",
-    "Assets\\邏ｫ髯ｽ闃ｱ蠎・ｴ\\UnityAgent\\localization": ""
+    "Assets\\鬯ｩ閧ｴ蠕励・・ｽ繝ｻ・ｫ鬯ｯ・ｮ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｽ鬯ｮ・｣郢晢ｽｻ繝ｻ・ｽ繝ｻ・ｱ鬮ｯ貅ｷ・ｼ・ｱ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｰ郢晢ｽｻ繝ｻ・ｴ\\UnityAgent\\Editor": "",
+    "Assets\\鬯ｩ閧ｴ蠕励・・ｽ繝ｻ・ｫ鬯ｯ・ｮ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｽ鬯ｮ・｣郢晢ｽｻ繝ｻ・ｽ繝ｻ・ｱ鬮ｯ貅ｷ・ｼ・ｱ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｰ郢晢ｽｻ繝ｻ・ｴ\\UnityAgent\\SDK": "",
+    "Assets\\鬯ｩ閧ｴ蠕励・・ｽ繝ｻ・ｫ鬯ｯ・ｮ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｽ鬯ｮ・｣郢晢ｽｻ繝ｻ・ｽ繝ｻ・ｱ鬮ｯ貅ｷ・ｼ・ｱ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｰ郢晢ｽｻ繝ｻ・ｴ\\UnityAgent\\localization": ""
   }
 }
