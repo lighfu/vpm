@@ -1,0 +1,8 @@
+/* MD3 Theme — Base styles for themed root elements */
+/* Colors are applied inline by MD3Theme.ApplyTo() */
+/* Components resolve theme via md3-dark/md3-light class detection */
+
+.md3-dark,
+.md3-light {
+    flex-grow: 1;
+}
