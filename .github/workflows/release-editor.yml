@@ -28,8 +28,8 @@ jobs:
 
       - name: Create Editor zip
         run: |
-          cd Packages
-          zip -r ../com.ajisaiflow.unityagent-${{ steps.version.outputs.version }}.zip com.ajisaiflow.unityagent/ -x "*.meta"
+          cd Packages/com.ajisaiflow.unityagent
+          zip -r ../../com.ajisaiflow.unityagent-${{ steps.version.outputs.version }}.zip . -x "*.meta"
 
       - name: Create tag and release
         env:

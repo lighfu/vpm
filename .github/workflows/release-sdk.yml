@@ -28,8 +28,8 @@ jobs:
 
       - name: Create SDK zip
         run: |
-          cd Packages
-          zip -r ../com.ajisaiflow.unityagent.sdk-${{ steps.version.outputs.version }}.zip com.ajisaiflow.unityagent.sdk/ -x "*.meta"
+          cd Packages/com.ajisaiflow.unityagent.sdk
+          zip -r ../../com.ajisaiflow.unityagent.sdk-${{ steps.version.outputs.version }}.zip . -x "*.meta"
 
       - name: Create tag and release
         env:
