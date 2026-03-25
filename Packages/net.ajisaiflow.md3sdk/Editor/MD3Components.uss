@@ -642,15 +642,9 @@
 .md3-foldout__chevron {
     width: 24px;
     height: 24px;
-    font-size: 14px;
+    font-size: 20px;
+    flex-shrink: 0;
     -unity-text-align: middle-center;
-    transition-property: rotate;
-    transition-duration: 150ms;
-    transition-timing-function: ease-in-out;
-}
-
-.md3-foldout--expanded .md3-foldout__chevron {
-    rotate: 180deg;
 }
 
 .md3-foldout__content-wrapper {
