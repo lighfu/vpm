@@ -143,16 +143,9 @@
     position: absolute;
     top: 6px;
     left: 6px;
-    transition-property: left, width, height, top, background-color;
-    transition-duration: 150ms, 150ms, 150ms, 150ms, 150ms;
-    transition-timing-function: ease-in-out, ease-in-out, ease-in-out, ease-in-out, ease-in-out;
-}
-
-.md3-switch--on .md3-switch__thumb {
-    width: 24px;
-    height: 24px;
-    top: 2px;
-    left: 24px;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
 }
 
 /* ── TextField ── */
