@@ -812,6 +812,8 @@
 
 .md3-list-item__body {
     flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
     flex-direction: column;
     justify-content: center;
     overflow: hidden;
