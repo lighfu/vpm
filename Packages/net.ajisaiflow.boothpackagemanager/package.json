@@ -1,7 +1,7 @@
 {
   "name": "net.ajisaiflow.boothpackagemanager",
   "displayName": "Booth Package Manager",
-  "version": "0.3.55",
+  "version": "0.3.56",
   "unity": "2022.3",
   "description": "Manage Booth.pm purchases in Unity Editor.",
   "author": {
