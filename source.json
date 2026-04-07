@@ -12,7 +12,8 @@
     "text": "View on GitHub"
   },
   "githubRepos": [
-    "lighfu/vpm"
+    "lighfu/vpm",
+    "lighfu/unity-agent"
   ],
   "packages": []
 }
