@@ -13,7 +13,8 @@
   },
   "githubRepos": [
     "lighfu/vpm",
-    "lighfu/unity-agent"
+    "lighfu/unity-agent",
+    "lighfu/unity-md3sdk"
   ],
   "packages": []
 }
