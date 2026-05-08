@@ -1,0 +1,23 @@
+{
+  "name": "net.ajisaiflow.anti-ripping",
+  "displayName": "Anti-Ripping",
+  "version": "0.34.1",
+  "unity": "2022.3",
+  "description": "VRChat アバターのリッピング対策ツール。 mesh / texture 暗号化、 BlendShape decoy、 各種難読化を NDMF パイプラインで適用。",
+  "author": {
+    "name": "AjisaiFlow",
+    "url": "https://github.com/lighfu"
+  },
+  "license": "See LICENSE",
+  "vpmDependencies": {
+    "nadena.dev.ndmf": ">=1.4.0",
+    "nadena.dev.modular-avatar": ">=1.10.0"
+  },
+  "keywords": [
+    "vrchat",
+    "anti-ripping",
+    "avatar-protection",
+    "ndmf",
+    "modular-avatar"
+  ]
+}
