@@ -61,7 +61,9 @@ namespace AjisaiFlow.AntiRipping
 
         // ────────────────────────────── 追跡保護 (v0.1) ──────────────────────────────
 
-        [Tooltip("Mesh / Material の name に作者署名を追記する。低コスト・高互換")]
+        [Tooltip("全 material に作者ハッシュ float (_AjisaiAR_Hash) を焼き込む。\n" +
+                 "shader 動作は変わらず、 AssetBundle 内の .mat に build id 由来の hash が残るため、\n" +
+                 "流出 .mat → ProtectionReport (Logs~) の build id 突合で身元証明に使える。")]
         [SerializeField] private bool enableAssetWatermark = true;
 
         [Tooltip("アバター階層に作者情報を含む不可視 GameObject を散りばめる")]
@@ -70,9 +72,6 @@ namespace AjisaiFlow.AntiRipping
         [Tooltip("ビルドごとに固有 ID を生成し、流出時の追跡に使えるレポートを Logs/ に書き出す")]
         [SerializeField] private bool enableBuildFingerprint = true;
 
-        [Tooltip("lilToon マテリアルが見つかった場合、頂点ハッシュキーを設定して改造を検出可能にする")]
-        [SerializeField] private bool enableLilToonProtection = true;
-
         // ────────────────────────────── 表示阻止 (v0.2) ──────────────────────────────
         // v0.3: enableMeshLock トグルを撤廃。AntiRippingTag を貼った時点で Mesh Lock は常時適用となる。
         // 鍵が未生成の場合のみビルド時にスキップされる (鍵を作成して初めて有効化される設計)。
@@ -80,7 +79,7 @@ namespace AjisaiFlow.AntiRipping
         [Tooltip("頂点を擬似ランダムに変位させる距離 (メートル)。\n" +
                  "大きいほど見た目が破壊されるが AABB が極端に拡大する。0.3〜1.0 推奨")]
         [Range(0.05f, 2.0f)]
-        [SerializeField] private float meshLockScrambleRadius = 0.1f;
+        [SerializeField] private float meshLockScrambleRadius = 0.05f;
 
         [Tooltip("ON: VRChat の保存パラメータに OSC で 1 回書けば次回以降自動復元 (推奨)\n" +
                  "OFF: 毎セッション AntiRippingClient による OSC 送信が必要 (より安全)")]
@@ -243,6 +242,22 @@ namespace AjisaiFlow.AntiRipping
                  "サイズ: encrypted (BC7) + mapping (RGBA32 同解像度) = 5 byte/pixel (RGBA32 単独の 1.25 倍)\n" +
                  "BC7 OFF にすると encrypted も RGBA32 = 8 byte/pixel (デバッグ用、 lossless decode)。")]
         [SerializeField] private bool useTextureXorSortMappingMode = false;
+
+        // ── v0.34.7: Fallback shader 用 placeholder (= VRChat Safety で shader fallback 中の他 user に低解像度 preview を見せる) ──
+        [Tooltip("v0.34.7: VRChat Safety で shader fallback 中の他ユーザーに低解像度の placeholder texture を表示する。\n" +
+                 "OFF の場合、 fallback shader 利用者は暗号化済 noise を albedo として描画してしまう (旧挙動)。\n" +
+                 "ON の場合、 _MainTex slot に低解像度 placeholder を bind し、 暗号化済 RGBA32 は別 property\n" +
+                 "(_AR_Enc_MainTex) に格納される。 locked variant shader は _AR_Enc_MainTex を読むため見た目変化なし。\n" +
+                 "default ON 推奨 (体験改善 vs わずかな VRAM 増のトレードオフ)。")]
+        [SerializeField] private bool showFallbackPlaceholder = true;
+
+        [Tooltip("v0.34.7: Fallback placeholder texture の解像度 (px)。\n" +
+                 "・16: モザイク状、 シルエット判別困難 (protection 最大)\n" +
+                 "・64 (default): ぼやけシルエット視認可、 protection と体験の妥協点\n" +
+                 "・256: ほぼ判別可能、 protection 効果が薄れる\n" +
+                 "VRAM 影響: 64x64 RGBA32 で +16 KB / texture (無視できる)。")]
+        [Range(16, 256)]
+        [SerializeField] private int fallbackPlaceholderResolution = 64;
 
         // ── v0.34.0+: Universal LIL_SAMPLE_* wrapper category groups ──
 
@@ -421,7 +436,6 @@ namespace AjisaiFlow.AntiRipping
         public bool EnableAssetWatermark => enableAssetWatermark;
         public bool EnableHierarchyWatermark => enableHierarchyWatermark;
         public bool EnableBuildFingerprint => enableBuildFingerprint;
-        public bool EnableLilToonProtection => enableLilToonProtection;
 
         public float MeshLockScrambleRadius => meshLockScrambleRadius;
         public bool MeshLockKeySaved => meshLockKeySaved;
@@ -525,6 +539,10 @@ namespace AjisaiFlow.AntiRipping
             }
         }
         public bool UseTextureXorSortMappingMode => useTextureXorSortMappingMode;
+
+        // v0.34.7: Fallback placeholder
+        public bool ShowFallbackPlaceholder => showFallbackPlaceholder;
+        public int FallbackPlaceholderResolution => Mathf.Clamp(fallbackPlaceholderResolution, 16, 256);
         public bool EnableGameObjectObfuscation => enableGameObjectObfuscation;
         public bool EnableBlendShapeObfuscation => enableBlendShapeObfuscation;
         public bool EnableAnimatorObfuscation => enableAnimatorObfuscation;
