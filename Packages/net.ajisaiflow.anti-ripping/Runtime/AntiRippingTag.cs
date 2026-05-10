@@ -261,21 +261,28 @@ namespace AjisaiFlow.AntiRipping
 
         // ── v0.34.0+: Universal LIL_SAMPLE_* wrapper category groups ──
 
-        [Tooltip("v0.34.1+ で activate: Mask group (single-channel mask 16 prop) を一括暗号化対象にする。\n" +
-                 "対象: _DetailMask, _MainColorAdjustMask, _MatCapBlendMask, _OutlineWidthMask, _ShadowBorderMask 等。\n" +
-                 "default OFF (opt-in、 既存挙動温存)。 v0.34.1 以降、 group ON で 16 prop が暗号化される。")]
-        [SerializeField] private bool encryptMaskGroup = false;
+        [Tooltip("v0.34.11 Stage 1 で activate: Mask group (single-channel mask ~17 prop) を一括暗号化対象にする。\n" +
+                 "対象: _MainColorAdjustMask, _Main{2,3}rdBlendMask, _Main{2,3}rdDissolveMask, _MatCapBlendMask,\n" +
+                 "      _OutlineWidthMask, _ShadowBorderMask, _ShadowBlurMask, _RimShadeMask, _DissolveMask,\n" +
+                 "      _FurNoiseMask, _FurMask, _FurLengthMask, _AnisotropyScaleMask 等。\n" +
+                 "skip (Stage 1): _MetallicGlossMap, _SmoothnessTex, _GlitterShapeTex, _TriMask (channel pack 系) /\n" +
+                 "                _ParallaxMap (height map 誤分類)。\n" +
+                 "default ON (Stage 1 安全範囲、 既存 v0.34.10 user は serialized field 値を維持)。")]
+        [SerializeField] private bool encryptMaskGroup = true;
 
-        [Tooltip("v0.34.2+ で activate: Color group (sRGB color 18 prop) を一括暗号化対象にする。\n" +
-                 "対象: _Main2ndTex (face eye decal), _Main3rdTex (face brow decal), _OutlineTex,\n" +
-                 "      _MatCapTex, _MatCap2ndTex, _RimColorTex, _Shadow*ColorTex 等。\n" +
-                 "default OFF (opt-in)。 v0.34.2 以降、 group ON で face decal 等が暗号化される。")]
-        [SerializeField] private bool encryptColorGroup = false;
+        [Tooltip("v0.34.11 Stage 1 で activate: Color group (sRGB color ~9 prop) を一括暗号化対象にする。\n" +
+                 "対象: _MainGradationTex, _OutlineTex, _Shadow{1,2,3}ColorTex, _BacklightColorTex, _ReflectionColorTex,\n" +
+                 "      _MatCap{1,2}Tex, _RimColorTex, _GlitterColorTex。\n" +
+                 "skip (Stage 1): _Main2ndTex / _Main3rdTex (= face decal、 lilGetSubTex 経由で v0.34.2 alpha 全失敗、\n" +
+                 "               Stage 3 R&D 待ち)。\n" +
+                 "default ON (Stage 1 安全範囲、 既存 v0.34.10 user は serialized field 値を維持)。")]
+        [SerializeField] private bool encryptColorGroup = true;
 
-        [Tooltip("v0.34.3+ で activate: Normal group (法線 5 prop) を一括暗号化対象にする。\n" +
-                 "対象: _Bump2ndMap, _MatCapBumpMap, _MatCap2ndBumpMap, _AnisotropyTangentMap, _OutlineVectorTex。\n" +
-                 "default OFF (opt-in)。 v0.34.3 以降、 group ON で 2nd normal 等が暗号化される。")]
-        [SerializeField] private bool encryptNormalGroup = false;
+        [Tooltip("v0.34.11 Stage 1 で activate: Normal group (法線 ~6 prop) を一括暗号化対象にする。\n" +
+                 "対象: _Bump2ndMap, _MatCapBumpMap, _MatCap2ndBumpMap, _AnisotropyTangentMap, _OutlineVectorTex,\n" +
+                 "      _FurVectorTex。\n" +
+                 "default ON (Stage 1 安全範囲、 既存 v0.34.10 user は serialized field 値を維持)。")]
+        [SerializeField] private bool encryptNormalGroup = true;
 
         [Tooltip("v0.34.4+ で activate: Emission group (発光 5 prop) を一括暗号化対象にする。\n" +
                  "対象: _EmissionMap, _Emission2ndMap, _EmissionGradTex, _Emission2ndGradTex 等。\n" +
@@ -285,6 +292,25 @@ namespace AjisaiFlow.AntiRipping
                  "全 lilToon variant (LIL_LITE / MULTI / REFRACTION × Forward / Outline / Meta / Shadow) で互換性 100% 構造保証。\n" +
                  "default OFF (opt-in、 段階 release で最後に活性化)。")]
         [SerializeField] private bool encryptEmissionGroup = false;
+
+        // ── v0.34.15 (案 Y): lilToon カスタム派生 shader 互換 mode ──
+
+        [Tooltip("v0.34.15 で activate: lilToon カスタム派生 shader (= shader name に 'lilToon' を含むが asset path が\n" +
+                 "jp.lilxyzw.liltoon 配下でないもの) を使う material を shader-lock / texture encryption の対象から\n" +
+                 "完全 skip する。\n" +
+                 "対象例:\n" +
+                 "  - BoundBonePro lilToonSquish ('Hidden/BoundBonePro/lilToonSquish/*')\n" +
+                 "  - lilToon Inspector の「カスタムシェーダー作成」 で生成された .lilcontainer / .lilblock 派生\n" +
+                 "  - サードパーティ vendor の lilToon 派生 (= custom.hlsl include / lilCustomVertexWS hook 拡張等)\n" +
+                 "これらは公式 lilToon と異なる include 構造 / vertex displacement / 独自 hook を持ち、\n" +
+                 "VRCAAR の lilToon wrapper 注入では shader 生成失敗 → BlendShape lock fallback + nullify safety mode に\n" +
+                 "なり material が真っ白に表示されてしまう (v0.34.13/14 の null 化制御アプローチでは完全復元不可)。\n" +
+                 "本 toggle ON 時、 該当 material は元のまま維持 (= visual 完全復元、 派生機能無傷)。\n" +
+                 "Trade-off: 該当 material の暗号化対象 prop は完全 leak 許容 (= AssetRipper 抽出可能)。\n" +
+                 "公式 lilToon material および Poiyomi material は通常通り暗号化されるため protection は維持。\n" +
+                 "default ON (カスタム派生 shader 利用 avatar での visual 破綻を default で防ぐ)。 false にすると従来挙動\n" +
+                 "(= 該当 material が BlendShape lock fallback + nullify safety mode、 v0.34.12 以前と同等で真っ白になる)。")]
+        [SerializeField] private bool skipCustomLilToonDerivatives = true;
 
         // ── Emergency disable switches (build-time、 group-level rollback) ──
         [Tooltip("v0.34.0+: 緊急時に Mask group を build-time で完全 disable (= group toggle ON でも暗号化 skip)。\n" +
@@ -483,6 +509,9 @@ namespace AjisaiFlow.AntiRipping
         public bool EncryptColorGroup    => EnableTexturePixelEncryption && encryptColorGroup    && !disableColorGroup;
         public bool EncryptNormalGroup   => EnableTexturePixelEncryption && encryptNormalGroup   && !disableNormalGroup;
         public bool EncryptEmissionGroup => EnableTexturePixelEncryption && encryptEmissionGroup && !disableEmissionGroup;
+
+        // v0.34.15: lilToon カスタム派生 shader 互換 mode accessor (BBP / 「カスタムシェーダー作成」 派生 / サードパーティ vendor 派生 等)
+        public bool SkipCustomLilToonDerivatives => skipCustomLilToonDerivatives;
 
         // v0.31.14 revert: EncryptEmissionMap property は v0.31.13 で追加したが致死 regression のため撤去。
         // v0.31.12: locked variant material から暗号化対象外 texture 参照を剥がす (= leak 防止、 visual fidelity 損失あり)
