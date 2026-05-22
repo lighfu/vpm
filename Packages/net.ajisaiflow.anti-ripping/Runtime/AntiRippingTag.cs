@@ -69,12 +69,19 @@ namespace AjisaiFlow.AntiRipping
         [Tooltip("アバター階層に作者情報を含む不可視 GameObject を散りばめる")]
         [SerializeField] private bool enableHierarchyWatermark = true;
 
-        [Tooltip("ビルドごとに固有 ID を生成し、流出時の追跡に使えるレポートを Logs/ に書き出す")]
+        [Tooltip("ビルドごとに固有 ID を生成し、流出時の追跡に使えるレポートを Assets/紫陽花広場/anti-ripping/Logs~/ に書き出す")]
         [SerializeField] private bool enableBuildFingerprint = true;
 
         // ────────────────────────────── 表示阻止 (v0.2) ──────────────────────────────
-        // v0.3: enableMeshLock トグルを撤廃。AntiRippingTag を貼った時点で Mesh Lock は常時適用となる。
-        // 鍵が未生成の場合のみビルド時にスキップされる (鍵を作成して初めて有効化される設計)。
+        // v0.3 で撤廃した enableMeshLock トグルを v0.34.20 で再導入。
+        // スコープは MeshLockPass の BlendShape 頂点 scramble のみ。
+        // shader-level decode (enableShaderLevelDecode) / texture 暗号化 (enableTexturePixelEncryption) /
+        // KeyAnimator / OSC sender / Unlock manifest は独立に動作する。
+        [Tooltip("MeshLockPass の BlendShape 頂点散乱 (mesh を locked variant に差し替えて頂点位置を擬似ランダムに変位) を有効化する。\n" +
+                 "OFF: 頂点散乱のみ skip。 shader-level decode / texture 暗号化 / KeyAnimator / OSC sender は\n" +
+                 "それぞれの toggle (enableShaderLevelDecode / enableTexturePixelEncryption) で個別に制御される。\n" +
+                 "頂点散乱を切ると AABB が膨らまない一方、 BlendShape 経路の解錠耐性は失われる。")]
+        [SerializeField] private bool enableMeshLock = true;
 
         [Tooltip("頂点を擬似ランダムに変位させる距離 (メートル)。\n" +
                  "大きいほど見た目が破壊されるが AABB が極端に拡大する。0.3〜1.0 推奨")]
@@ -447,9 +454,6 @@ namespace AjisaiFlow.AntiRipping
 
         // ────────────────────────────── 詳細 ──────────────────────────────
 
-        [Tooltip("ビルドレポート (流出追跡用) をプロジェクト内 Logs/ フォルダに書き出すか")]
-        [SerializeField] private bool writeReportToProject = true;
-
         [Tooltip("ビルド時に Console へ詳細ログを出すか")]
         [SerializeField] private bool verboseLogging = false;
 
@@ -463,6 +467,7 @@ namespace AjisaiFlow.AntiRipping
         public bool EnableHierarchyWatermark => enableHierarchyWatermark;
         public bool EnableBuildFingerprint => enableBuildFingerprint;
 
+        public bool EnableMeshLock => enableMeshLock;
         public float MeshLockScrambleRadius => meshLockScrambleRadius;
         public bool MeshLockKeySaved => meshLockKeySaved;
         public string MeshLockKeyHex => meshLockKeyHex;
@@ -667,7 +672,6 @@ namespace AjisaiFlow.AntiRipping
             return $"_AjisaiAR_K{index}";
         }
 
-        public bool WriteReportToProject => writeReportToProject;
         public bool VerboseLogging => verboseLogging;
 
         public bool HasMinimalConfig() => !string.IsNullOrWhiteSpace(creatorName);
