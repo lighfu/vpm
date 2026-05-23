@@ -370,6 +370,15 @@ namespace AjisaiFlow.AntiRipping
                  "Optimizing phase で実行されるため MA / FaceEmo / lilycal-Inventory 等の controller も全て覆われる。")]
         [SerializeField] private bool enableAnimatorObfuscation = false;
 
+        [Tooltip("v0.36+: ON で Animator パラメータ難読化を決定論的 (再現可能) にする。\n" +
+                 "同じ元パラメータ名は常に同じ難読名になり、PC と Quest を別々にビルドしても一致する。\n" +
+                 "enableAnimatorObfuscation が ON のときのみ効果あり。 既定 OFF (ビルド毎ランダム)。")]
+        [SerializeField] private bool deterministicObfuscation = false;
+
+        [Tooltip("決定論的難読化の安定シード (32 文字 hex)。 トグル ON 時に Inspector が自動生成。\n" +
+                 "PC/Quest を別 prefab で作る場合は両 prefab に同じ値を設定する。")]
+        [SerializeField] private string obfuscationSeedHex = "";
+
         [Tooltip("v0.23+: avatar が参照する Mesh / Material / AnimationClip / AvatarMask の\n" +
                  "**アセット名そのもの** を _<16hex> にランダム rename する。\n" +
                  "v0.25+: AnimatorController アセット名も対象。\n" +
@@ -580,6 +589,8 @@ namespace AjisaiFlow.AntiRipping
         public bool EnableGameObjectObfuscation => enableGameObjectObfuscation;
         public bool EnableBlendShapeObfuscation => enableBlendShapeObfuscation;
         public bool EnableAnimatorObfuscation => enableAnimatorObfuscation;
+        public bool DeterministicObfuscation => deterministicObfuscation;
+        public string ObfuscationSeedHex => obfuscationSeedHex ?? "";
         public bool EnableAssetNameObfuscation => enableAssetNameObfuscation;
         public bool EnableBlendShapeDecoy => enableBlendShapeDecoy;
         public int BlendShapeDecoyMinCount => Mathf.Clamp(blendShapeDecoyMinCount, 0, 128);
