@@ -154,6 +154,16 @@ namespace AjisaiFlow.AntiRipping
                  "OFF にすると BlendShape lock のみで保護される (shader 解析耐性は弱まる)。")]
         [SerializeField] private bool enableShaderLevelDecode = true;
 
+        [Tooltip("v0.37+: MeshRenderer を SkinnedMeshRenderer に build 時に型変換し、 BlendShape 経路で\n" +
+                 "mesh-level scramble する。 MR の Safety Mode 対応 (= custom shader 無効化時も形状復元) が完全化される。\n" +
+                 "対象: lockable shader (lilToon / Poiyomi 系) を持つ MeshRenderer のみ。 非対応 shader の MR は変換されない。\n" +
+                 "変換ロジック: Mesh を clone + 全頂点 weight=1.0 で root bone bind + bindposes=identity +\n" +
+                 "SMR component 追加 (Renderer base prop 完全コピー) + 元 MR/MeshFilter Destroy。\n" +
+                 "副作用: VRChat Performance Stat の SMR 数が増え、 Rank downgrade のリスクあり (Quest では特に影響大)。\n" +
+                 "build 時に Rank 計算し downgrade した場合は ARLog.Warn で警告ログ出力。\n" +
+                 "default OFF (= opt-in)。 Quest 向け build にも適用される (ユーザー責任で判断)。")]
+        [SerializeField] private bool enableMeshRendererToSkinnedConversion = false;
+
         [Tooltip("Shader-level Decode で追加でロック対象に含めたい shader 名 (部分一致、大文字小文字無視)。\n" +
                  "例: 'XSToon'、'Sunao'。\n" +
                  "lilToon / Poiyomi 派生は自動検出されるのでここに書く必要は無い。\n" +
@@ -362,6 +372,13 @@ namespace AjisaiFlow.AntiRipping
                  "GameObject 難読化と同じく NDMF AnimatorServicesContext 経由で全 plugin の clip も rewrite される。")]
         [SerializeField] private bool enableBlendShapeObfuscation = false;
 
+        [Tooltip("v0.37+: BlendShape 難読化 ON 時に MMD ワールド用の標準モーフ (= あ / い / う / え / お / ω / にこり / まばたき / ハイライト消し 等) を\n" +
+                 "rename 対象から除外する (= 順序シャッフルには参加するが名前は元のまま維持される)。\n" +
+                 "MMD DanceController は BlendShape 名で SetBlendShapeWeight を呼ぶため、 rename されると MMD ワールドで表情が動かなくなる。\n" +
+                 "また 「-------MMD-------」「=======MMD=======」 等の section divider (= 名前に「MMD」 を含む BS) も自動的に除外される。\n" +
+                 "default ON (= MMD 互換性を確保)。 OFF にすると従来挙動 (= 全 BS rename、 MMD 表情が壊れる) になる。")]
+        [SerializeField] private bool excludeMmdBlendShapes = true;
+
         [Tooltip("v0.21+: ビルド時に AnimatorController の Layer 名 / State 名 / StateMachine 名 / Parameter 名を\n" +
                  "_<16hex> にランダム rename する。 Transition condition / VRCAvatarParameterDriver / VRCExpressionParameters /\n" +
                  "VRCExpressionsMenu / MA ModularAvatarParameters の参照は全て同期 rewrite される。\n" +
@@ -369,6 +386,14 @@ namespace AjisaiFlow.AntiRipping
                  "(K0..K7 / LockNow / Broadcast / Score / One) は rename 対象から除外され機能に影響しない。\n" +
                  "Optimizing phase で実行されるため MA / FaceEmo / lilycal-Inventory 等の controller も全て覆われる。")]
         [SerializeField] private bool enableAnimatorObfuscation = false;
+
+        [Tooltip("v0.37+: Animator パラメータ難読化 ON 時に VRCOSC (心拍計 / SpeechToText 等の外部 OSC アプリ) が\n" +
+                 "書き込むパラメータ (= 名前が「VRCOSC/」 で始まるもの、 例: VRCOSC/Heartrate/Average 等) を\n" +
+                 "rename 対象から除外する。\n" +
+                 "VRCOSC アプリは外部から OSC で /avatar/parameters/VRCOSC/Heartrate/Average 等を送信するため、\n" +
+                 "rename されると avatar 側で受信できず心拍計などが機能停止する。\n" +
+                 "default ON (= VRCOSC 互換性を確保)。 OFF にすると従来挙動 (= 全 param rename、 VRCOSC が壊れる)。")]
+        [SerializeField] private bool excludeVrcOscParameters = true;
 
         [Tooltip("v0.36+: ON で Animator パラメータ難読化を決定論的 (再現可能) にする。\n" +
                  "同じ元パラメータ名は常に同じ難読名になり、PC と Quest を別々にビルドしても一致する。\n" +
@@ -501,6 +526,12 @@ namespace AjisaiFlow.AntiRipping
         public bool HasMeshLockHolderObjectName => !string.IsNullOrEmpty(meshLockHolderObjectName);
 
         public bool EnableShaderLevelDecode => enableShaderLevelDecode;
+
+        // v0.37+: MR→SMR 変換 toggle (= lockable shader を持つ MR を build 時に SMR 化)。
+        // EnableShaderLevelDecode との AND を取る (= shader-level decode OFF 時は変換しても意味がない)。
+        public bool EnableMeshRendererToSkinnedConversion =>
+            enableMeshRendererToSkinnedConversion && enableShaderLevelDecode;
+
         public string[] ExtraShaderNamesToLock => extraShaderNamesToLock ?? new string[0];
         public string[] ExcludeFromShaderLock => excludeFromShaderLock ?? new string[0];
 
@@ -588,7 +619,14 @@ namespace AjisaiFlow.AntiRipping
         public int FallbackPlaceholderResolution => Mathf.Clamp(fallbackPlaceholderResolution, 16, 256);
         public bool EnableGameObjectObfuscation => enableGameObjectObfuscation;
         public bool EnableBlendShapeObfuscation => enableBlendShapeObfuscation;
+
+        // v0.37+: MMD 標準モーフを BlendShape 難読化対象から除外 (default ON、 MMD 互換性確保)
+        public bool ExcludeMmdBlendShapes => excludeMmdBlendShapes;
         public bool EnableAnimatorObfuscation => enableAnimatorObfuscation;
+
+        // v0.37+: VRCOSC 等の外部 OSC アプリの parameter を Animator 難読化対象から除外 (default ON)
+        public bool ExcludeVrcOscParameters => excludeVrcOscParameters;
+
         public bool DeterministicObfuscation => deterministicObfuscation;
         public string ObfuscationSeedHex => obfuscationSeedHex ?? "";
         public bool EnableAssetNameObfuscation => enableAssetNameObfuscation;
