@@ -504,21 +504,22 @@ namespace AjisaiFlow.AntiRipping
         [Tooltip("ビルド時に Console へ詳細ログを出すか")]
         [SerializeField] private bool verboseLogging = false;
 
-        // v0.37.8: 生成 shader を build 間で保持して Unity ShaderCache を有効化 (= build 高速化 opt-in)。
-        // 通常は build 終了時に Generated/Shaders/_AR_*.shader が全削除されるため、 次 build で
-        // Unity は新 shader 扱いで全 variant を 1 から compile し直す (= 多 material avatar で数十分)。
-        // このトグル ON で sweep を skip し、 同じ shader 内容なら Unity が cache hit して compile を
-        // 数分単位に短縮する。 trade-off: locked shader file が disk に残るため、 attacker が
-        // shader 構造を解析可能になる (ただし texture 復号には _AR_TK0..3 = Animator AAP score が
-        // 必要なため、 shader 抽出だけでは texture 復号は不可)。 開発時のみ ON 推奨、 release build
-        // (= 配布版 publish) では OFF 必須。
-        [Tooltip("生成シェーダーをビルド間で保持してビルド時間を短縮 (開発時のみ ON 推奨)\n" +
+        // v0.37.8 導入 / v0.38: default ON。 生成 shader を build 間で保持して Unity ShaderCache を有効化。
+        // OFF だと build 終了時に Generated/Shaders/_AR_*.shader が全削除され、 次 build で Unity は
+        // 新 shader 扱いで全 variant を 1 から compile し直す (= 多 material avatar で数十分)。
+        // ON で sweep を skip し、 content-skip (WriteIfChanged) と組み合わせて同一内容なら write/import
+        // を省略 → cache hit で compile を数分単位に短縮する。 旧ファイルは GeneratedShaderSweepPass が
+        // version sentinel ベースで掃除する (同 version は全保持)。
+        // trade-off: locked shader file が disk に残るため attacker が shader 構造を解析可能になる
+        // (ただし texture 復号には _AR_TK0..3 = Animator AAP score が必要で、 shader 抽出だけでは
+        // texture 復号は不可)。 解析耐性を最大化したい配布時は OFF にできる (任意)。
+        [Tooltip("生成シェーダーをビルド間で保持してビルド時間を短縮 (default ON)\n" +
                  "効果: Unity ShaderCache が hit し shader compile が大幅短縮 (= 多 material avatar で数十分→数分)。\n" +
                  "trade-off: locked shader file が Generated/Shaders/_AR_*.shader として disk に残り、\n" +
                  "解析者が shader 構造を読める。 ただし texture 復号には Animator AAP score 累積が必要なため、\n" +
                  "shader 単体抽出では texture は復号できない (= protection が完全に失われるわけではない)。\n" +
-                 "publish 用 build (= 配布) では OFF 必須。")]
-        [SerializeField] private bool keepGeneratedShadersBetweenBuilds = false;
+                 "default ON。 解析耐性を最大化したい配布時のみ OFF にできる (任意)。")]
+        [SerializeField] private bool keepGeneratedShadersBetweenBuilds = true;
 
         // ────────────────────────────── プロパティ ──────────────────────────────
 
