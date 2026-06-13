@@ -1,8 +1,0 @@
-{
-  "name": "Ajisaiflow (Dev)",
-  "id": "com.ajisaiflow.unityagent.listing.dev",
-  "url": "https://lighfu.github.io/vpm/dev/index.json",
-  "author": { "name": "AjisaiFlow" },
-  "githubRepos": ["lighfu/vpm-dev"],
-  "packages": []
-}
