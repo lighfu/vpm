@@ -7,8 +7,6 @@ on:
     paths: source.json
   release:
     types: [published]
-  repository_dispatch:
-    types: [dev-release]
 
 permissions:
   contents: read
@@ -47,18 +45,8 @@ jobs:
             ~/.nuget/packages
           key: ${{ runner.os }}-${{ hashFiles('**/global.json', '**/*.csproj') }}
 
-      # Stable → Website/
       - name: Build Stable Listing
         run: ${{env.pathToCi}}/build.cmd BuildMultiPackageListing --root ${{env.pathToCi}} --list-publish-directory $GITHUB_WORKSPACE/${{env.listPublishDirectory}}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Dev → Website/dev/
-      - name: Build Dev Listing
-        run: |
-          cp source-dev.json source.json
-          mkdir -p $GITHUB_WORKSPACE/${{env.listPublishDirectory}}/dev
-          ${{env.pathToCi}}/build.cmd BuildMultiPackageListing --root ${{env.pathToCi}} --list-publish-directory $GITHUB_WORKSPACE/${{env.listPublishDirectory}}/dev
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
