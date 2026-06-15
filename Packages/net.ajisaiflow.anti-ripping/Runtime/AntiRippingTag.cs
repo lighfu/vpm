@@ -83,8 +83,10 @@ namespace AjisaiFlow.AntiRipping
                  "頂点散乱を切ると AABB が膨らまない一方、 BlendShape 経路の解錠耐性は失われる。")]
         [SerializeField] private bool enableMeshLock = true;
 
-        [Tooltip("頂点を擬似ランダムに変位させる距離 (メートル)。\n" +
-                 "大きいほど見た目が破壊されるが AABB が極端に拡大する。0.3〜1.0 推奨")]
+        [Tooltip("collapse-to-point の収束点まわりの微小ジッタ距離 (メートル)。\n" +
+                 "ロック中は描画停止 (m_Enabled=0) されるため bounds は元メッシュ境界のままで AABB は肥大しない。\n" +
+                 "force-enable 時は頂点が一点に収束 (collapse-to-point) し面積ゼロの縮退三角形になる (overdraw ほぼゼロ)。\n" +
+                 "この値は収束点まわりの微小ジッタ (保険) のみに影響する。")]
         [Range(0.05f, 2.0f)]
         [SerializeField] private float meshLockScrambleRadius = 0.05f;
 
