@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using nadena.dev.ndmf;
 using UnityEngine;
 
@@ -142,6 +143,17 @@ namespace AjisaiFlow.AntiRipping
                  "ShaderLockPass の存在 / 役割を識別困難にする (従来の固定名 _AjisaiAR_InvBroadcast 撤廃)。")]
         [SerializeField] private string meshLockInvBroadcastParamName = "";
 
+        [Tooltip("v0.42+: 解錠中に owner が数秒おきに toggle する synced bool パラメータ名 (heartbeat)。\n" +
+                 "値は表示に使わず、 toggle のたび VRChat の同期ブロック (解錠 broadcast を含む) を再送させ、\n" +
+                 "後から見始めた / アバターを再描画したリモートにも解錠状態が届きやすくする保険。 鍵生成時にランダム化。")]
+        [SerializeField] private string meshLockHeartbeatParamName = "";
+
+        [Tooltip("v0.43+: テクスチャ復号鍵 TK0..3 を synced で remote へ届ける OSC/animator パラメータ名 4 つ。\n" +
+                 "鍵生成時にランダム 16 文字 hex で命名され、 解錠鍵下位 4 byte (keyBytes[0..3]) を運ぶ。\n" +
+                 "synced Int で 0..255 を正確に配送し、 1D-BT-copy で material._AR_TK を復元する。\n" +
+                 "旧データ (未生成) は固定名 _AjisaiAR_TK0..3 にフォールバック。")]
+        [SerializeField] private string[] meshLockTextureKeyParamNames = new string[0];
+
         [Tooltip("各 K_i に乗じる salt 値 (8 byte / 1〜255)。\n" +
                  "score = Σ (K_i × salt_i) / 255 で計算され、鍵が一致したときだけ expected と等しくなる。\n" +
                  "salt はクリップに埋もれるため、attacker は 1 つの expected 値から 8 個の鍵を逆算する必要がある。")]
@@ -194,6 +206,22 @@ namespace AjisaiFlow.AntiRipping
                  "重要: 列挙した material の **全テクスチャ** が leak 対象になる。 main color texture も含まれる場合は\n" +
                  "保護効果が大幅に下がるため慎重に検討してください。")]
         [SerializeField] private Material[] excludeFromTextureEncryption = new Material[0];
+
+        // v0.42: テクスチャ暗号化の whitelist (include-only) モード。
+        // ON のとき、 textureEncryptionIncludeMaterials に列挙した material **だけ** を暗号化し、 それ以外は
+        // 全て暗号化 skip する (= leak 許容)。 「頭と体だけ暗号化したい」等、 除外リストに大量列挙する手間を省く。
+        // OFF (既定) のときは従来の blacklist (excludeFromTextureEncryption) 動作。
+        // exclude リストは include-only でも優先される (include かつ exclude の material は skip = exclude が勝つ)。
+        [Tooltip("v0.42+: ON にすると『含めた material だけ』テクスチャ暗号化する (whitelist モード)。\n" +
+                 "頭・体だけ暗号化したい等、 除外リストに大量入力する手間を省ける。\n" +
+                 "重要: ここに入れなかった material のテクスチャは全て暗号化されず AssetBundle に残る (= 抽出可能)。\n" +
+                 "OFF (既定) のときは従来どおり『除外リスト以外を全て暗号化』する blacklist 動作。")]
+        [SerializeField] private bool textureEncryptionIncludeOnly = false;
+
+        [Tooltip("v0.42+: include-only モード ON のとき、 暗号化する material をここに列挙する。\n" +
+                 "元 (src) material reference で指定 (avatar prefab に貼られている material)。\n" +
+                 "ここに無い material はテクスチャ暗号化されない (shader-lock / mesh 保護は別 toggle のまま動く)。")]
+        [SerializeField] private Material[] textureEncryptionIncludeMaterials = new Material[0];
 
         // ────────────────────────────── Texture Pixel Encryption (v0.31, 実験的) ──────────────────────────────
 
@@ -496,10 +524,59 @@ namespace AjisaiFlow.AntiRipping
         [Tooltip("v0.29+: avatar 配下の各 Transform の子順序 (sibling index) を Fisher-Yates でランダム並び替えする。\n" +
                  "AssetRipper 抽出時に「上から Body / Hair / Outfit / 装飾」のような直感的順序が消え、\n" +
                  "攻撃者が hierarchy 構造から avatar の組成を推測する手間が増える。\n" +
-                 "sibling 順序は AnimationClip path / Mecanim Humanoid / SMR.bones[] のいずれにも影響しないため\n" +
-                 "副作用ゼロ (Animator / 物理 / 表情 / メニューすべて完全に無傷)。\n" +
+                 "sibling 順序は AnimationClip path / Mecanim Humanoid / SMR.bones[] には影響しない\n" +
+                 "(Animator / 物理 / 表情 は無傷)。\n" +
+                 "注意: MA Menu Item / Menu Group は sibling 順でメニュー項目順が決まるため、 シャッフルすると\n" +
+                 "メニューの並びが乱れる。 下の preserveMaMenuOrder (default ON) で防止できる。\n" +
                  "副作用: Inspector / Hierarchy で順序が毎ビルドごとに変わるため debug 性能↓。")]
         [SerializeField] private bool enableHierarchyShuffle = false;
+
+        [Tooltip("v0.42+: Hierarchy Shuffle ON 時に、 MA Menu Item / Menu Group を子に持つ親の子順序を\n" +
+                 "シャッフルから除外し、 メニュー項目の並び順を保持する。\n" +
+                 "MA はヒエラルキー上の sibling 順でメニュー項目の表示順を決めるため、 シャッフルすると\n" +
+                 "メニューがちゃがちゃになる。 ON でメニュー関連ノードのみ順序を保持し、 それ以外は通常通りシャッフルする。\n" +
+                 "default ON (= メニューを壊さない)。 OFF にすると従来挙動 (= メニューもシャッフル対象)。\n" +
+                 "(Modular Avatar 未導入時はこの設定に関わらずメニュー処理自体が無いため無影響。)")]
+        [SerializeField] private bool preserveMaMenuOrder = true;
+
+        // ────────────────────────────── 対象別絞り込み (v0.42) ──────────────────────────────
+        // #2/#3/#5: 難読化の「対象」をユーザーが個別に絞り込む (= blacklist 除外) 統合設定。
+        // 既存の excludeFromShaderLock / excludeFromTextureEncryption / MmdBlendShapeWhitelist と
+        // 同じ「全対象にかけて個別に外す」設計に揃える。
+
+        [Tooltip("v0.42+: 難読化 (GameObject 名難読化) の影響を受けない GameObject を指定する。\n" +
+                 "指定された GO は元の名前のまま維持され rename されない (= AssetRipper で意味のある名前が残るため\n" +
+                 "当該 GO の識別防止効果は下がるが、 外部ツール / 他ワールドが GO 名やパスに依存する場合の互換性を確保できる)。\n" +
+                 "用途: 名前依存の外部連携 GO、 OSC で path 参照される GO、 デバッグで追跡したい GO 等。\n" +
+                 "enableGameObjectObfuscation が ON のときのみ意味を持つ。 参照は元 prefab/scene の GameObject。")]
+        [SerializeField] private GameObject[] obfuscationExcludeGameObjects = new GameObject[0];
+
+        [Tooltip("v0.42+: ON のとき、 上で指定した GameObject の子孫 (子・孫…) も全て GO 名難読化から除外する。\n" +
+                 "OFF のときは指定した GameObject 自身のみ除外する。\n" +
+                 "default ON (= 衣装ルートを 1 つ指定すれば配下メッシュ全部を除外、という最頻ユースケースに合わせる)。")]
+        [SerializeField] private bool obfuscationExcludeIncludeChildren = true;
+
+        [Tooltip("v0.42+: BlendShape 難読化 ON 時に、 フェイストラッキング (VRCFaceTracking / ARKit / SRanipal /\n" +
+                 "Unified Expressions) の標準 BlendShape 名 (jawOpen / eyeBlinkLeft / Jaw_Open / JawOpen 等) を\n" +
+                 "rename 対象から除外する (= 順序シャッフルには参加するが名前は元のまま維持)。\n" +
+                 "FT は外部 OSC アプリ / 別ワールドが BlendShape 名を前提に駆動するため、 rename されると連携が切れる。\n" +
+                 "照合は case-insensitive 完全一致 (ARKit camelCase / SRanipal underscore / Unified PascalCase の\n" +
+                 "綴り揺れを吸収)。 default ON (MMD/VRCOSC 除外と同じ互換性優先方針)。")]
+        [SerializeField] private bool excludeFaceTrackingBlendShapes = true;
+
+        [Tooltip("v0.42+: BlendShape 難読化から手動で除外する BlendShape 名 (case-insensitive 完全一致)。\n" +
+                 "FT プリセット (excludeFaceTrackingBlendShapes) で拾えない作者独自命名の BlendShape を救済する。\n" +
+                 "例: 独自の表情ギミック BlendShape を外部 OSC で名前駆動する場合等。\n" +
+                 "指定された BlendShape は rename されず元の名前のまま残る (= 当該 BS の識別防止効果は下がる)。")]
+        [SerializeField] private string[] extraBlendShapesToExclude = new string[0];
+
+        [Tooltip("v0.42+: Animator パラメータ難読化から手動で除外するパラメータ名。\n" +
+                 "なでなで等の接触ギミックは VRC Contact Receiver の parameter を自動追従 rewrite して保護されるが、\n" +
+                 "非標準コンポーネント / OSC 駆動 contact / SDK 版差で自動追従が取りこぼした場合の救済用。\n" +
+                 "照合: 完全一致 (case-sensitive。 VRChat parameter は case-sensitive)。\n" +
+                 "末尾が '/' のエントリは prefix 一致 (例: 'MyGimmick/' は 'MyGimmick/Foo' 等に前方一致)。\n" +
+                 "指定されたパラメータは rename されず元の名前のまま残る。")]
+        [SerializeField] private string[] excludeParameterNamesFromObfuscation = new string[0];
 
         // ────────────────────────────── 詳細 ──────────────────────────────
 
@@ -540,6 +617,11 @@ namespace AjisaiFlow.AntiRipping
         // v0.9: 16 文字 hex (8 byte / 64 bit)。旧形式 (8 文字 hex / 32 bit) は無効扱い → 再生成必要
         public bool HasMeshLockKey => !string.IsNullOrEmpty(meshLockKeyHex) && meshLockKeyHex.Length == 16;
         public const int KeyByteCount = 8;
+
+        /// <summary>
+        /// テクスチャ復号鍵 TK の byte 数。 PackKeyBytes が下位 4 byte を使うため 4 (= K0..K3 に対応)。
+        /// </summary>
+        public const int TextureKeyByteCount = 4;
 
         public string[] MeshLockParamNames => meshLockParamNames ?? new string[0];
         public bool HasMeshLockParamNames => meshLockParamNames != null && meshLockParamNames.Length == KeyByteCount
@@ -694,6 +776,88 @@ namespace AjisaiFlow.AntiRipping
 
         public bool EnableHierarchyShuffle => enableHierarchyShuffle;
 
+        // v0.42+: Hierarchy Shuffle 時に MA メニュー (Menu Item / Group) の sibling 順を保持する (default ON)
+        public bool PreserveMaMenuOrder => preserveMaMenuOrder;
+
+        // ────────────────────────────── 対象別絞り込み (v0.42) accessors ──────────────────────────────
+
+        // #2: GO 名難読化の除外対象 (子含むフラグ付き)
+        public GameObject[] ObfuscationExcludeGameObjects => obfuscationExcludeGameObjects ?? new GameObject[0];
+        public bool ObfuscationExcludeIncludeChildren => obfuscationExcludeIncludeChildren;
+
+        // #3: FT BlendShape 除外トグル + 手動追加リスト
+        public bool ExcludeFaceTrackingBlendShapes => excludeFaceTrackingBlendShapes;
+        public string[] ExtraBlendShapesToExclude => extraBlendShapesToExclude ?? new string[0];
+
+        // #4/#5: パラメータ難読化の手動除外リスト
+        public string[] ExcludeParameterNamesFromObfuscation => excludeParameterNamesFromObfuscation ?? new string[0];
+
+        /// <summary>
+        /// v0.42 (#2): GO 名難読化から除外する Transform を集約して <paramref name="into"/> に追加する。
+        /// 各除外 GameObject 自身を追加し、 <see cref="ObfuscationExcludeIncludeChildren"/> が true なら
+        /// その子孫 Transform も全て追加する。
+        /// avatar 外 / 別 avatar 配下に誤指定された GO は無視する (avatarRoot 配下のみ採用)。
+        /// GameObjectObfuscationPass の protectedTransforms にこの集合を合流させることで、
+        /// 既存の protectedTransforms.Contains(t) チェックがそのまま除外 GO (+子) を rename からスキップする。
+        /// </summary>
+        public void CollectObfuscationExcludedTransforms(Transform avatarRoot, HashSet<Transform> into)
+        {
+            if (into == null || obfuscationExcludeGameObjects == null) return;
+            for (int i = 0; i < obfuscationExcludeGameObjects.Length; i++)
+            {
+                var go = obfuscationExcludeGameObjects[i];
+                if (go == null) continue;
+                var t = go.transform;
+                // stray reference ガード: avatarRoot 配下 (= 自身 or 子孫) のみ採用
+                if (avatarRoot != null && t != avatarRoot && !t.IsChildOf(avatarRoot)) continue;
+                into.Add(t);
+                if (obfuscationExcludeIncludeChildren)
+                {
+                    var children = go.GetComponentsInChildren<Transform>(true);
+                    for (int c = 0; c < children.Length; c++) into.Add(children[c]);
+                }
+            }
+        }
+
+        /// <summary>
+        /// v0.42 (#3/#5): BlendShape 名が手動除外リスト (<see cref="ExtraBlendShapesToExclude"/>) に
+        /// 含まれるか判定する (case-insensitive 完全一致)。
+        /// FT プリセット (FaceTrackingBlendShapeWhitelist) との OR 結合は Editor 側
+        /// (BlendShapeObfuscationPass) で行う (Runtime は Editor whitelist を参照できないため)。
+        /// </summary>
+        public bool IsBlendShapeManuallyExcluded(string blendShapeName)
+        {
+            if (string.IsNullOrEmpty(blendShapeName) || extraBlendShapesToExclude == null) return false;
+            for (int i = 0; i < extraBlendShapesToExclude.Length; i++)
+            {
+                var n = extraBlendShapesToExclude[i];
+                if (string.IsNullOrEmpty(n)) continue;
+                if (string.Equals(n, blendShapeName, System.StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// v0.42 (#4/#5): パラメータ名が手動除外リスト (<see cref="ExcludeParameterNamesFromObfuscation"/>) に
+        /// 含まれるか判定する。 完全一致 (case-sensitive) が基本。 末尾が '/' のエントリは prefix 一致。
+        /// AnimatorObfuscationPass が paramRenameMap 構築時にこれを呼び、 true なら rename しない。
+        /// </summary>
+        public bool IsParameterObfuscationExcluded(string parameterName)
+        {
+            if (string.IsNullOrEmpty(parameterName) || excludeParameterNamesFromObfuscation == null) return false;
+            for (int i = 0; i < excludeParameterNamesFromObfuscation.Length; i++)
+            {
+                var n = excludeParameterNamesFromObfuscation[i];
+                if (string.IsNullOrEmpty(n)) continue;
+                if (n.EndsWith("/", System.StringComparison.Ordinal))
+                {
+                    if (parameterName.StartsWith(n, System.StringComparison.Ordinal)) return true;
+                }
+                else if (string.Equals(n, parameterName, System.StringComparison.Ordinal)) return true;
+            }
+            return false;
+        }
+
         /// <summary>
         /// 与えられた shader が AntiRipping の lock 対象とみなせるかを判定する。
         /// 自動対象: lilToon 派生 / Poiyomi 派生 (".poiyomi/..." または "Poiyomi" を含む)。
@@ -761,6 +925,25 @@ namespace AjisaiFlow.AntiRipping
         public string GetInvBroadcastParamName() =>
             string.IsNullOrEmpty(meshLockInvBroadcastParamName) ? "_AjisaiAR_InvBroadcast" : meshLockInvBroadcastParamName;
 
+        // v0.42: 解錠中の heartbeat (synced bool) param 名。空時 (旧データ) は固定名フォールバック。
+        public string GetHeartbeatParamName() =>
+            string.IsNullOrEmpty(meshLockHeartbeatParamName) ? "_AjisaiAR_Heartbeat" : meshLockHeartbeatParamName;
+
+        public string[] MeshLockTextureKeyParamNames => meshLockTextureKeyParamNames ?? new string[0];
+
+        public bool HasMeshLockTextureKeyParamNames =>
+            meshLockTextureKeyParamNames != null
+            && meshLockTextureKeyParamNames.Length == TextureKeyByteCount
+            && System.Array.TrueForAll(meshLockTextureKeyParamNames, n => !string.IsNullOrEmpty(n));
+
+        // v0.43: テクスチャ鍵 TK_i の synced param 名。 未生成 (旧データ) は固定名フォールバック。
+        public string GetTextureKeyParamName(int index)
+        {
+            if (index < 0 || index >= TextureKeyByteCount) return null;
+            if (HasMeshLockTextureKeyParamNames) return meshLockTextureKeyParamNames[index];
+            return $"_AjisaiAR_TK{index}";
+        }
+
         /// <summary>
         /// パラメータ名を取り出す。未生成の場合は固定名にフォールバック (旧データ動作維持用)。
         /// </summary>
@@ -791,6 +974,31 @@ namespace AjisaiFlow.AntiRipping
                 if (excludeFromTextureEncryption[i] == srcMat) return true;
             }
             return false;
+        }
+
+        // v0.42: include-only (whitelist) モード。
+        public bool TextureEncryptionIncludeOnly => textureEncryptionIncludeOnly;
+        public Material[] TextureEncryptionIncludeMaterials => textureEncryptionIncludeMaterials ?? new Material[0];
+
+        /// <summary>
+        /// v0.42: include-only モードにより src material が暗号化 skip 対象か判定する。
+        /// モード OFF のときは常に false (この規則では skip しない)。
+        /// モード ON のときは include リストに含まれない material を skip 対象 (true) とする
+        /// (リストが空なら全 material が skip = 暗号化されない)。
+        /// exclude リスト (IsTextureEncryptionExcluded) とは独立で、 呼び出し側で OR して使う (exclude が勝つ)。
+        /// reference 比較で、 prefab に貼られている original material のみマッチする。
+        /// </summary>
+        public bool IsTextureEncryptionSkippedByIncludeOnly(Material srcMat)
+        {
+            if (!textureEncryptionIncludeOnly) return false;
+            if (srcMat == null) return false; // null は他経路で扱う。 ここでは skip 判定しない
+            var list = textureEncryptionIncludeMaterials;
+            if (list == null) return true; // include-only ON かつ list 未設定 → 全て skip
+            for (int i = 0; i < list.Length; i++)
+            {
+                if (list[i] == srcMat) return false; // include リストにある → skip しない (= 暗号化する)
+            }
+            return true; // include-only ON かつ list に無い → skip (= 暗号化しない)
         }
 
         public bool HasMinimalConfig() => !string.IsNullOrWhiteSpace(creatorName);
