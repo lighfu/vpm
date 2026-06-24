@@ -5,8 +5,6 @@ on:
   push:
     branches: main
     paths: source.json
-  release:
-    types: [published]
 
 permissions:
   contents: read
