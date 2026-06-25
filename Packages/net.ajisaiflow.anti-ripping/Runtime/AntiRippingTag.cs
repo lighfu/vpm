@@ -5,37 +5,6 @@ using UnityEngine;
 namespace AjisaiFlow.AntiRipping
 {
     /// <summary>
-    /// v0.31: encrypted texture の圧縮形式選択肢。
-    /// 既存 bool toggle (compressEncryptedTextureBC7) との互換性を保つため、
-    /// AutoFromToggle (= 0) を default として持ち、 これは旧 bool 値に従う動作。
-    /// それ以外は明示的に format を指定する。
-    /// 各形式の特性:
-    ///  - Uncompressed (RGBA32): lossless、 4 byte/pixel、 BC7 ε ノイズ完全回避だがサイズ 4×
-    ///  - BC7: PC 向け高品質、 1 byte/pixel、 alpha 連動 mode 5/7 で precision 落ちる懸念あり
-    ///  - BC3 (DXT5): alpha 対応、 1 byte/pixel、 5-6-5 RGB precision (BC7 より低い)
-    ///  - BC1 (DXT1): alpha 無し (alpha → 1.0 強制)、 0.5 byte/pixel、 5-6-5 precision、 サイズ最小
-    ///  - ETC2_RGBA: モバイル向け、 1 byte/pixel、 PC GPU では software decode の可能性
-    ///  - ASTC_4x4: 高品質可変、 1 byte/pixel、 モバイル・モダン PC 対応
-    /// </summary>
-    public enum EncryptedTextureCompression
-    {
-        /// <summary>旧 compressEncryptedTextureBC7 toggle に従う (legacy migration)</summary>
-        AutoFromToggle = 0,
-        /// <summary>RGBA32 lossless (BC7 ε ノイズ完全回避、 サイズ 4×)</summary>
-        Uncompressed = 1,
-        /// <summary>BC7: PC 向け高品質</summary>
-        BC7 = 2,
-        /// <summary>BC3 / DXT5: alpha 対応の古典 PC 形式</summary>
-        BC3 = 3,
-        /// <summary>BC1 / DXT1: alpha 無し、 サイズ最小</summary>
-        BC1 = 4,
-        /// <summary>ETC2 RGBA: モバイル向け</summary>
-        ETC2_RGBA = 5,
-        /// <summary>ASTC 4×4 RGBA: 高品質可変</summary>
-        ASTC_4x4 = 6,
-    }
-
-    /// <summary>
     /// アバタールートに 1 つだけ貼って使う Editor 専用コンポーネント。
     /// ビルド時に NDMF パスがこのコンポーネントを検出し、設定された保護レイヤーをアバターに焼き込む。
     /// INDMFEditorOnly を実装しているため、ビルド成果物には残らない。
@@ -273,35 +242,6 @@ namespace AjisaiFlow.AntiRipping
                  "サイズ目安: 4K RGBA32 = 64 MB、 2K RGBA32 = 16 MB、 1K RGBA32 = 4 MB")]
         [Range(256, 8192)]
         [SerializeField] private int textureEncryptionMaxResolution = 2048;
-
-        [Tooltip("v0.31 (legacy): 暗号化 texture を BC7 圧縮する旧 bool toggle。\n" +
-                 "v0.31.x で encryptedTextureCompression enum (下) に置き換え予定。\n" +
-                 "enum が AutoFromToggle (default) のときのみこの bool が参照される。\n" +
-                 "enum を Uncompressed / BC7 / BC3 / BC1 / ETC2 / ASTC のいずれかに設定すると enum 側が優先される。")]
-        [SerializeField] private bool compressEncryptedTextureBC7 = false;
-
-        [Tooltip("v0.31.x: 暗号化 texture の圧縮形式選択。\n" +
-                 "・AutoFromToggle (default): 旧 BC7 bool toggle に従う (= 互換)\n" +
-                 "・Uncompressed (RGBA32): lossless、 BC7 ε ノイズ完全回避、 サイズ 4× (推奨: 品質優先時)\n" +
-                 "・BC7: PC 向け高品質 1 byte/pixel、 alpha 変動で mode 5/7 選択され precision 低下の懸念\n" +
-                 "・BC3 (DXT5): alpha 対応、 5-6-5 RGB precision (BC7 より低)\n" +
-                 "・BC1 (DXT1): alpha 無し (alpha=1.0 強制で透明度消失)、 サイズ最小 0.5 byte/pixel\n" +
-                 "・ETC2_RGBA: モバイル向け、 PC GPU では software decode 可能性\n" +
-                 "・ASTC_4x4: モバイル・モダン PC 両対応、 高品質可変 1 byte/pixel\n" +
-                 "形式によっては Unity 側で対応 GPU 不在時に CPU decode フォールバックや RGBA32 自動展開される。\n" +
-                 "ノイズ・サイズ・品質のトレードオフを user が直接試行可能。")]
-        [SerializeField] private EncryptedTextureCompression encryptedTextureCompression = EncryptedTextureCompression.AutoFromToggle;
-
-        [Tooltip("v0.31 実験的★推奨: XOR Sort + Mapping mode (default OFF)。\n" +
-                 "1. 全 pixel に Value XOR (= 完全 random byte に)\n" +
-                 "2. **Global sort**: 全 pixel を luminance 順に並び替え、 texture 上から下に向かって配置\n" +
-                 "   (= 隣接 BC7 block 同士の color が連続的に変化、 boundary noise なし)\n" +
-                 "3. sort permutation を別 mapping texture (= 元解像度の RGBA32) に保存\n" +
-                 "4. shader は per-fragment で mapping から (sx, sy) 取得 → encrypted を sample → XOR decode\n" +
-                 "結果: BC7 圧縮 + 完全 noise (safety mode 耐性) + 復元時クリーン (ノイズなし)\n" +
-                 "サイズ: encrypted (BC7) + mapping (RGBA32 同解像度) = 5 byte/pixel (RGBA32 単独の 1.25 倍)\n" +
-                 "BC7 OFF にすると encrypted も RGBA32 = 8 byte/pixel (デバッグ用、 lossless decode)。")]
-        [SerializeField] private bool useTextureXorSortMappingMode = false;
 
         // ── v0.34.7: Fallback shader 用 placeholder (= VRChat Safety で shader fallback 中の他 user に低解像度 preview を見せる) ──
         [Tooltip("v0.34.7: VRChat Safety で shader fallback 中の他ユーザーに低解像度の placeholder texture を表示する。\n" +
@@ -678,73 +618,6 @@ namespace AjisaiFlow.AntiRipping
         public bool StripUnencryptedTextureRefs => EnableTexturePixelEncryption && stripUnencryptedTextureRefs;
         public bool AcknowledgeVRCFuryLeak => acknowledgeVRCFuryLeak;
         public int TextureEncryptionMaxResolution => Mathf.Clamp(textureEncryptionMaxResolution, 256, 8192);
-        public bool CompressEncryptedTextureBC7 => compressEncryptedTextureBC7;
-
-        /// <summary>
-        /// v0.31.x: encrypted texture の圧縮形式を解決する。 AutoFromToggle のときは旧 bool に従う。
-        /// 戻り値:
-        ///  - null: 圧縮しない (RGBA32 そのまま、 lossless)
-        ///  - それ以外: 該当 TextureFormat (BC7 / DXT5 / DXT1 / ETC2_RGBA8 / ASTC_RGBA_4x4)
-        /// 呼び出し側 (TextureFormatHelper.CreateEncryptedTexture) は null なら圧縮 skip、
-        /// それ以外なら EditorUtility.CompressTexture(target, format, Best) を呼ぶ。
-        ///
-        /// v0.37.8: XorSortMapping mode OFF のときは <strong>強制 Uncompressed</strong>。
-        /// 理由: ValueXor mode + 任意圧縮形式 (BC7/BC3/BC1/ETC2/ASTC) は XOR amplification で
-        /// モザイクノイズ発生する致命的組合せ。 XorSortMapping mode は sort + 6-bit rounded 設計で
-        /// BC7 ε ≈ 0 を構造保証するため、 圧縮との両立が成立する。
-        /// enum 値は保存したまま (= XorSortMapping mode を後で ON 復帰したら元の選択値が自動復活)。
-        /// </summary>
-        public TextureFormat? GetEncryptedTextureCompressionFormat()
-        {
-            // v0.37.8 構造的 safety gate: XorSortMapping mode OFF なら無条件 Uncompressed。
-            if (!useTextureXorSortMappingMode)
-            {
-                return null;
-            }
-
-            var mode = encryptedTextureCompression;
-            // AutoFromToggle: 旧 bool に従う (BC7 ON → BC7、 OFF → 圧縮なし)
-            if (mode == EncryptedTextureCompression.AutoFromToggle)
-            {
-                mode = compressEncryptedTextureBC7
-                    ? EncryptedTextureCompression.BC7
-                    : EncryptedTextureCompression.Uncompressed;
-            }
-            switch (mode)
-            {
-                case EncryptedTextureCompression.BC7: return TextureFormat.BC7;
-                case EncryptedTextureCompression.BC3: return TextureFormat.DXT5;
-                case EncryptedTextureCompression.BC1: return TextureFormat.DXT1;
-                case EncryptedTextureCompression.ETC2_RGBA: return TextureFormat.ETC2_RGBA8;
-                case EncryptedTextureCompression.ASTC_4x4: return TextureFormat.ASTC_4x4;
-                case EncryptedTextureCompression.Uncompressed:
-                default:
-                    return null;
-            }
-        }
-
-        /// <summary>選択中の圧縮形式 (AutoFromToggle 解決後の最終 mode)。 ログ・Inspector 表示用。</summary>
-        public EncryptedTextureCompression ResolvedEncryptedTextureCompression
-        {
-            get
-            {
-                // v0.37.8: XorSortMapping mode OFF なら強制 Uncompressed (= GetEncryptedTextureCompressionFormat と同じ logic)
-                if (!useTextureXorSortMappingMode)
-                {
-                    return EncryptedTextureCompression.Uncompressed;
-                }
-
-                var mode = encryptedTextureCompression;
-                if (mode == EncryptedTextureCompression.AutoFromToggle)
-                {
-                    mode = compressEncryptedTextureBC7
-                        ? EncryptedTextureCompression.BC7
-                        : EncryptedTextureCompression.Uncompressed;
-                }
-                return mode;
-            }
-        }
-        public bool UseTextureXorSortMappingMode => useTextureXorSortMappingMode;
 
         // v0.34.7: Fallback placeholder
         public bool ShowFallbackPlaceholder => showFallbackPlaceholder;
