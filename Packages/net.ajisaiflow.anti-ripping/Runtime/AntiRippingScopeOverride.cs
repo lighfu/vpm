@@ -9,11 +9,13 @@ namespace AjisaiFlow.AntiRipping
     /// per-GameObject スコープ override コンポーネント。 アバタールートの <see cref="AntiRippingTag"/> が
     /// 全体方針を持つのに対し、 こちらは「この衣装/このメッシュだけ難読化から外す」局所的な上書き。
     ///
-    /// 対象次元は GO に「綺麗に紐づく」 3 つに限定する (param / asset 名 / AnimatorController は
+    /// 対象次元は GO に「綺麗に紐づく」 4 つに限定する (param / asset 名 / AnimatorController は
     /// avatar 全体のグローバル名前空間で per-GO 所有が成立しないため対象外。 それらは AntiRippingTag の
     /// グローバル除外リストで扱う):
     ///   - Hierarchy 並び替え: この GO の子順序を保持する (この GO 配下を撹乱しない)
     ///   - BlendShape 難読化: この GO の SkinnedMeshRenderer の sharedMesh の BlendShape を rename しない
+    ///   - Mesh Lock (頂点ロック): この GO の SkinnedMeshRenderer を Mesh Lock の頂点スクランブルから除外する
+    ///     (SPS plug 等、 シェーダーで rest-pose 頂点を変形する mesh は頂点配列の置換で変形が破綻するため)
     ///   - テクスチャ暗号化: この GO の Renderer が参照する material の texture を暗号化しない
     ///
     /// INDMFEditorOnly を実装しているため、 ビルド成果物には残らない (AntiRippingTag と同様)。
@@ -36,6 +38,12 @@ namespace AjisaiFlow.AntiRipping
                  "注意: 同じ mesh を他 GO も使っている場合、 その mesh 全体が除外される (共有)。")]
         [SerializeField] private bool excludeBlendShapeObfuscation = false;
 
+        [Tooltip("ON のとき、 この GameObject の SkinnedMeshRenderer を Mesh Lock (頂点スクランブル + Unlock BlendShape) から除外する。\n" +
+                 "SPS plug など、 シェーダーで rest-pose 頂点を変形させる mesh は、 頂点配列を collapse されると変形が散乱して破綻する。\n" +
+                 "除外すると元 mesh のまま保たれ SPS 等が正常動作する。\n" +
+                 "注意: 除外した mesh は Mesh Lock で保護されない (リッピング耐性が下がる)。 同じ mesh を他 GO も使っている場合、 その mesh 全体が除外される (共有)。")]
+        [SerializeField] private bool excludeMeshLockVertexScramble = false;
+
         [Tooltip("ON のとき、 この GameObject の Renderer が参照する material の texture を\n" +
                  "テクスチャ暗号化から除外する (= 元 texture が AssetBundle に残り抽出可能になる)。\n" +
                  "注意: 同じ material を他 GO も使っている場合、 その material 全体が除外される (共有)。")]
@@ -47,12 +55,14 @@ namespace AjisaiFlow.AntiRipping
 
         public bool ExcludeHierarchyShuffle => excludeHierarchyShuffle;
         public bool ExcludeBlendShapeObfuscation => excludeBlendShapeObfuscation;
+        public bool ExcludeMeshLockVertexScramble => excludeMeshLockVertexScramble;
         public bool ExcludeTextureEncryption => excludeTextureEncryption;
         public bool IncludeChildren => includeChildren;
 
         /// <summary>いずれかの次元の除外が有効か (UI 表示・skip 判定用)。</summary>
         public bool HasAnyExclusion =>
-            excludeHierarchyShuffle || excludeBlendShapeObfuscation || excludeTextureEncryption;
+            excludeHierarchyShuffle || excludeBlendShapeObfuscation
+            || excludeMeshLockVertexScramble || excludeTextureEncryption;
 
         // ────────────────────────────── 静的コレクタ (各 NDMF パスがビルド時に呼ぶ) ──────────────────────────────
 
@@ -90,6 +100,32 @@ namespace AjisaiFlow.AntiRipping
             foreach (var ov in avatar.GetComponentsInChildren<AntiRippingScopeOverride>(true))
             {
                 if (ov == null || !ov.excludeBlendShapeObfuscation) continue;
+                var smrs = ov.includeChildren
+                    ? ov.GetComponentsInChildren<SkinnedMeshRenderer>(true)
+                    : ov.GetComponents<SkinnedMeshRenderer>();
+                for (int i = 0; i < smrs.Length; i++)
+                {
+                    if (smrs[i] != null && smrs[i].sharedMesh != null) set.Add(smrs[i].sharedMesh);
+                }
+            }
+            return set;
+        }
+
+        /// <summary>
+        /// Mesh Lock (頂点スクランブル + Unlock BlendShape) から除外する Mesh 集合を集める。
+        /// excludeMeshLockVertexScramble が ON の GO (+ IncludeChildren なら子孫) の SkinnedMeshRenderer の sharedMesh。
+        /// MeshLockPass はこの集合に含まれる sharedMesh を持つ SMR を完全に skip する (頂点 collapse / Unlock BlendShape 追加 /
+        /// 描画停止 (m_Enabled=0) / 解錠対象登録 のいずれも行わない)。 SPS plug 等、 シェーダーで rest-pose 頂点を変形する
+        /// mesh は頂点配列を置換されると変形が破綻するため、 これで元 mesh を保持して保護対象外にする。
+        /// 共有 mesh はいずれかの GO で除外されると全体が除外される (mesh 単位、 BlendShape 難読化除外と同一意味論)。
+        /// </summary>
+        public static HashSet<Mesh> CollectMeshLockExcludedMeshes(GameObject avatar)
+        {
+            var set = new HashSet<Mesh>();
+            if (avatar == null) return set;
+            foreach (var ov in avatar.GetComponentsInChildren<AntiRippingScopeOverride>(true))
+            {
+                if (ov == null || !ov.excludeMeshLockVertexScramble) continue;
                 var smrs = ov.includeChildren
                     ? ov.GetComponentsInChildren<SkinnedMeshRenderer>(true)
                     : ov.GetComponents<SkinnedMeshRenderer>();
