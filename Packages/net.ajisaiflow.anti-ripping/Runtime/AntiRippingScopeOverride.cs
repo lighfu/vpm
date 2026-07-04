@@ -9,7 +9,7 @@ namespace AjisaiFlow.AntiRipping
     /// per-GameObject スコープ override コンポーネント。 アバタールートの <see cref="AntiRippingTag"/> が
     /// 全体方針を持つのに対し、 こちらは「この衣装/このメッシュだけ難読化から外す」局所的な上書き。
     ///
-    /// 対象次元は GO に「綺麗に紐づく」 4 つに限定する (param / asset 名 / AnimatorController は
+    /// 対象次元は GO に「綺麗に紐づく」 5 つに限定する (param / asset 名 / AnimatorController は
     /// avatar 全体のグローバル名前空間で per-GO 所有が成立しないため対象外。 それらは AntiRippingTag の
     /// グローバル除外リストで扱う):
     ///   - Hierarchy 並び替え: この GO の子順序を保持する (この GO 配下を撹乱しない)
@@ -17,6 +17,8 @@ namespace AjisaiFlow.AntiRipping
     ///   - Mesh Lock (頂点ロック): この GO の SkinnedMeshRenderer を Mesh Lock の頂点スクランブルから除外する
     ///     (SPS plug 等、 シェーダーで rest-pose 頂点を変形する mesh は頂点配列の置換で変形が破綻するため)
     ///   - テクスチャ暗号化: この GO の Renderer が参照する material の texture を暗号化しない
+    ///   - シェーダーロック: この GO の Renderer を material の locked variant 差し替えから除外する
+    ///     (SPS/TPS 等、 ビルド時に material shader を patch する外部ツールとの併用向け。 v0.48)
     ///
     /// INDMFEditorOnly を実装しているため、 ビルド成果物には残らない (AntiRippingTag と同様)。
     /// 各 NDMF パスはビルド時に下記の静的コレクタで除外集合を構築して尊重する。
@@ -49,6 +51,14 @@ namespace AjisaiFlow.AntiRipping
                  "注意: 同じ material を他 GO も使っている場合、 その material 全体が除外される (共有)。")]
         [SerializeField] private bool excludeTextureEncryption = false;
 
+        [Tooltip("ON のとき、 この GameObject の Renderer (SkinnedMeshRenderer / MeshRenderer) をシェーダーロック\n" +
+                 "(material を locked variant に差し替える保護) から除外する。 material は元 shader のまま維持され、\n" +
+                 "この Renderer の material にはテクスチャ暗号化も適用されない。\n" +
+                 "SPS plug など、 ビルド時に material の shader を改変 (patch) する外部ツールと併用する Renderer に使う。\n" +
+                 "注意: 除外した Renderer の material / texture はリッピング保護されない。 material を他 GO と共有している場合、\n" +
+                 "共有先の texture も平文で同梱される (共有先の暗号化が実効性を失う)。")]
+        [SerializeField] private bool excludeShaderLockSwap = false;
+
         [Tooltip("ON (既定) のとき、 上記の除外をこの GameObject の子孫にも適用する。\n" +
                  "OFF のときはこの GameObject 自身のみが対象。")]
         [SerializeField] private bool includeChildren = true;
@@ -57,12 +67,14 @@ namespace AjisaiFlow.AntiRipping
         public bool ExcludeBlendShapeObfuscation => excludeBlendShapeObfuscation;
         public bool ExcludeMeshLockVertexScramble => excludeMeshLockVertexScramble;
         public bool ExcludeTextureEncryption => excludeTextureEncryption;
+        public bool ExcludeShaderLockSwap => excludeShaderLockSwap;
         public bool IncludeChildren => includeChildren;
 
         /// <summary>いずれかの次元の除外が有効か (UI 表示・skip 判定用)。</summary>
         public bool HasAnyExclusion =>
             excludeHierarchyShuffle || excludeBlendShapeObfuscation
-            || excludeMeshLockVertexScramble || excludeTextureEncryption;
+            || excludeMeshLockVertexScramble || excludeTextureEncryption
+            || excludeShaderLockSwap;
 
         // ────────────────────────────── 静的コレクタ (各 NDMF パスがビルド時に呼ぶ) ──────────────────────────────
 
@@ -161,6 +173,32 @@ namespace AjisaiFlow.AntiRipping
                     {
                         if (mats[m] != null) set.Add(mats[m]);
                     }
+                }
+            }
+            return set;
+        }
+
+        /// <summary>
+        /// シェーダーロック (material の locked variant swap) + テクスチャ暗号化から除外する Renderer 集合を集める。
+        /// excludeShaderLockSwap が ON の GO (+ IncludeChildren なら子孫) の Renderer (SMR + MR)。
+        /// 他次元 (mesh/material 単位) と異なり Renderer 単位 (= material swap の適用単位) で除外する。
+        /// ShaderLockPass / TextureEncryptionPass は SPS plug の自動検出 (PenetrationSystemDetector) との OR で
+        /// この集合を尊重する。 手動除外には共有 material ガードを適用しない (ユーザーの明示意思を尊重) が、
+        /// 共有を検出した場合はビルドログに Warn が出る。
+        /// </summary>
+        public static HashSet<Renderer> CollectShaderLockExcludedRenderers(GameObject avatar)
+        {
+            var set = new HashSet<Renderer>();
+            if (avatar == null) return set;
+            foreach (var ov in avatar.GetComponentsInChildren<AntiRippingScopeOverride>(true))
+            {
+                if (ov == null || !ov.excludeShaderLockSwap) continue;
+                var renderers = ov.includeChildren
+                    ? ov.GetComponentsInChildren<Renderer>(true)
+                    : ov.GetComponents<Renderer>();
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    if (renderers[i] != null) set.Add(renderers[i]);
                 }
             }
             return set;

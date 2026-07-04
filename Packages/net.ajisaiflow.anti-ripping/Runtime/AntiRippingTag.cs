@@ -71,6 +71,13 @@ namespace AjisaiFlow.AntiRipping
                  "注意: 自動除外された plug は Mesh Lock で保護されない (頂点変形保持とのトレードオフ。 SPS と Mesh Lock は原理的に両立不可)。")]
         [SerializeField] private bool autoExcludeSpsDpsFromMeshLock = true;
 
+        [Tooltip("ON (既定): 検出した SPS / DPS / TPS plug renderer をシェーダーロック (material の locked variant 差し替え) と\n" +
+                 "テクスチャ暗号化からも自動除外する。 VRCFury はビルド時に plug material の shader を patch するため、\n" +
+                 "AR 生成 shader が対象になると TPS はビルド失敗、 SPS は表示異常のリスクがある。\n" +
+                 "plug が body と material を共有している場合は除外しない (body texture の平文化防止、 ログで通知)。\n" +
+                 "注意: 除外された plug の material / texture はリッピング保護されない。")]
+        [SerializeField] private bool autoExcludePlugFromShaderLock = true;
+
         [Tooltip("解錠キー (16 文字 hex = 64 bit / 8 byte)。Inspector の「鍵を作成」ボタンで生成。\n" +
                  "鍵が空の場合はビルド時に Mesh Lock がスキップされる (警告ログ)。\n" +
                  "v0.9 から 32bit → 64bit に拡張 (純粋総当たり耐性 ~1.8×10^19 通り)。")]
@@ -561,6 +568,7 @@ namespace AjisaiFlow.AntiRipping
         public float MeshLockScrambleRadius => meshLockScrambleRadius;
         public bool MeshLockKeySaved => meshLockKeySaved;
         public bool AutoExcludeSpsDpsFromMeshLock => autoExcludeSpsDpsFromMeshLock;
+        public bool AutoExcludePlugFromShaderLock => autoExcludePlugFromShaderLock;
         public string MeshLockKeyHex => meshLockKeyHex;
         // v0.9: 16 文字 hex (8 byte / 64 bit)。旧形式 (8 文字 hex / 32 bit) は無効扱い → 再生成必要
         public bool HasMeshLockKey => !string.IsNullOrEmpty(meshLockKeyHex) && meshLockKeyHex.Length == 16;
