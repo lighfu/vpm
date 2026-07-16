@@ -42,6 +42,9 @@ namespace AjisaiFlow.AntiRipping
         [Tooltip("ビルドごとに固有 ID を生成し、流出時の追跡に使えるレポートを Assets/紫陽花広場/anti-ripping/Logs~/ に書き出す")]
         [SerializeField] private bool enableBuildFingerprint = true;
 
+        [Tooltip("ビルド終了時に NDMF レポートウィンドウへ難読化サマリ・失敗・スキップ要素を表示する。ONだと毎ビルド後にウィンドウが自動で開く")]
+        [SerializeField] private bool showBuildReportInNdmf = true;
+
         // ────────────────────────────── 表示阻止 (v0.2) ──────────────────────────────
         // v0.3 で撤廃した enableMeshLock トグルを v0.34.20 で再導入。
         // スコープは MeshLockPass の BlendShape 頂点 scramble のみ。
@@ -52,13 +55,6 @@ namespace AjisaiFlow.AntiRipping
                  "それぞれの toggle (enableShaderLevelDecode / enableTexturePixelEncryption) で個別に制御される。\n" +
                  "頂点散乱を切ると AABB が膨らまない一方、 BlendShape 経路の解錠耐性は失われる。")]
         [SerializeField] private bool enableMeshLock = true;
-
-        [Tooltip("collapse-to-point の収束点まわりの微小ジッタ距離 (メートル)。\n" +
-                 "ロック中は描画停止 (m_Enabled=0) されるため bounds は元メッシュ境界のままで AABB は肥大しない。\n" +
-                 "force-enable 時は頂点が一点に収束 (collapse-to-point) し面積ゼロの縮退三角形になる (overdraw ほぼゼロ)。\n" +
-                 "この値は収束点まわりの微小ジッタ (保険) のみに影響する。")]
-        [Range(0.05f, 2.0f)]
-        [SerializeField] private float meshLockScrambleRadius = 0.05f;
 
         [Tooltip("ON: VRChat の保存パラメータに OSC で 1 回書けば次回以降自動復元 (推奨)\n" +
                  "OFF: 毎セッション AntiRippingClient による OSC 送信が必要 (より安全)")]
@@ -144,11 +140,14 @@ namespace AjisaiFlow.AntiRipping
 
         [Tooltip("v0.13+: シェーダーレベル復号 (default: ON)。\n" +
                  "lilToon / Poiyomi のソース shader をコピー + textual injection で locked variant を生成し、\n" +
-                 "頂点 shader 内で UV6/UV7 と _AR_K0..3 から直接復号する。\n" +
+                 "shader 内でテクスチャを復号する (_AR_TK0..3 駆動の LIL_SAMPLE_2D wrapper 経路)。\n" +
                  "見た目は元 shader (lilToon / Poiyomi) と完全に同じまま、\n" +
-                 "AnimatorController を解析されても鍵は露出せず、メッシュに復元情報が残らない。\n" +
-                 "対応 shader が無い material や multi-material renderer は BlendShape lock に自動フォールバック。\n" +
-                 "OFF にすると BlendShape lock のみで保護される (shader 解析耐性は弱まる)。")]
+                 "AnimatorController を解析されても鍵は露出しない。\n" +
+                 "テクスチャ暗号化 (enableTexturePixelEncryption) はこのトグルとの AND で有効になる。\n" +
+                 "v0.37.2 以降、 lilToon の locked variant は頂点 (mesh) 復号を行わない (_AR_K0..3 は dead uniform)。\n" +
+                 "mesh の散乱と復元は MeshLockPass の BlendShape Unlock が担う (Poiyomi のみ頂点復号を持つ)。\n" +
+                 "対応 shader が無い material は shader-lock 対象外 (元 material 維持)。\n" +
+                 "OFF にすると BlendShape lock のみで保護され、 テクスチャ暗号化も動かない。")]
         [SerializeField] private bool enableShaderLevelDecode = true;
 
         [Tooltip("v0.37+: MeshRenderer を SkinnedMeshRenderer に build 時に型変換し、 BlendShape 経路で\n" +
@@ -524,6 +523,13 @@ namespace AjisaiFlow.AntiRipping
                  "指定された BlendShape は rename されず元の名前のまま残る (= 当該 BS の識別防止効果は下がる)。")]
         [SerializeField] private string[] extraBlendShapesToExclude = new string[0];
 
+        [Tooltip("フェイストラッキング用パラメータ (v2/ prefix 等) をパラメータ名難読化から除外する。\n" +
+                 "VRCFaceTracking 等の外部アプリは名前で OSC 送信するため、 rename すると顔トラッキングが機能停止する。\n" +
+                 "対象: 'v2/' で始まる、 または '/v2/' を含む (組織 prefix 形 'X/v2/...') パラメータ、\n" +
+                 "および legacy 3 名 (EyeTrackingActive / LipTrackingActive / ExpressionTrackingActive)。\n" +
+                 "default ON (excludeFaceTrackingBlendShapes と対になる互換性優先方針)。")]
+        [SerializeField] private bool excludeFaceTrackingParameters = true;
+
         [Tooltip("v0.42+: Animator パラメータ難読化から手動で除外するパラメータ名。\n" +
                  "なでなで等の接触ギミックは VRC Contact Receiver の parameter を自動追従 rewrite して保護されるが、\n" +
                  "非標準コンポーネント / OSC 駆動 contact / SDK 版差で自動追従が取りこぼした場合の救済用。\n" +
@@ -563,9 +569,12 @@ namespace AjisaiFlow.AntiRipping
         public bool EnableAssetWatermark => enableAssetWatermark;
         public bool EnableHierarchyWatermark => enableHierarchyWatermark;
         public bool EnableBuildFingerprint => enableBuildFingerprint;
+        public bool ShowBuildReportInNdmf => showBuildReportInNdmf;
 
         public bool EnableMeshLock => enableMeshLock;
-        public float MeshLockScrambleRadius => meshLockScrambleRadius;
+        // v0.49: メッシュ崩しの強さは 0.1m 固定 (設定 UI から撤去)。 旧 meshLockScrambleRadius 直列化フィールドは廃止。
+        //   MeshLockPass の BlendShape 頂点 scramble 半径 / ShaderLockPass の UV displacement magnitude (×2.0) の基準値。
+        public float MeshLockScrambleRadius => 0.1f;
         public bool MeshLockKeySaved => meshLockKeySaved;
         public bool AutoExcludeSpsDpsFromMeshLock => autoExcludeSpsDpsFromMeshLock;
         public bool AutoExcludePlugFromShaderLock => autoExcludePlugFromShaderLock;
@@ -681,6 +690,9 @@ namespace AjisaiFlow.AntiRipping
         // #4/#5: パラメータ難読化の手動除外リスト
         public string[] ExcludeParameterNamesFromObfuscation => excludeParameterNamesFromObfuscation ?? new string[0];
 
+        // FT パラメータ (v2/ prefix 等) をパラメータ名難読化から自動除外するトグル
+        public bool ExcludeFaceTrackingParameters => excludeFaceTrackingParameters;
+
         /// <summary>
         /// v0.42 (#2): GO 名難読化から除外する Transform を集約して <paramref name="into"/> に追加する。
         /// 各除外 GameObject 自身を追加し、 <see cref="ObfuscationExcludeIncludeChildren"/> が true なら
@@ -748,6 +760,26 @@ namespace AjisaiFlow.AntiRipping
         }
 
         /// <summary>
+        /// パラメータ名が VRCFaceTracking (Unified Expressions) の外部 OSC 駆動パラメータかを判定する。
+        /// VRCFaceTracking は unified expressions を 'v2/JawOpen' の様に 'v2/' prefix で送信し、
+        /// 組織 prefix 付き ('MyOrg/v2/JawOpen' 等) の形も存在する。 加えて legacy 3 名
+        /// (EyeTrackingActive / LipTrackingActive / ExpressionTrackingActive) も外部駆動される。
+        /// これらは外部アプリが名前で OSC 送信するため、 難読化 rename すると顔トラが機能停止する。
+        /// 照合: 'v2/' 前方一致 ∨ '/v2/' 部分一致 ∨ legacy 3 名との完全一致 (いずれも Ordinal)。
+        /// null / 空文字は false。
+        /// </summary>
+        public static bool IsFaceTrackingParameter(string parameterName)
+        {
+            if (string.IsNullOrEmpty(parameterName)) return false;
+            if (parameterName.StartsWith("v2/", System.StringComparison.Ordinal)) return true;
+            if (parameterName.IndexOf("/v2/", System.StringComparison.Ordinal) >= 0) return true;
+            if (string.Equals(parameterName, "EyeTrackingActive", System.StringComparison.Ordinal)) return true;
+            if (string.Equals(parameterName, "LipTrackingActive", System.StringComparison.Ordinal)) return true;
+            if (string.Equals(parameterName, "ExpressionTrackingActive", System.StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        /// <summary>
         /// 与えられた shader が AntiRipping の lock 対象とみなせるかを判定する。
         /// 自動対象: lilToon 派生 / Poiyomi 派生 (".poiyomi/..." または "Poiyomi" を含む)。
         /// 加えて <c>ExtraShaderNamesToLock</c> に指定された shader 名 (部分一致、大文字小文字無視) も対象。
@@ -756,34 +788,57 @@ namespace AjisaiFlow.AntiRipping
         /// </summary>
         public bool ShouldLockShader(Shader shader)
         {
+            return MatchesLockTargetShader(shader) && !MatchesShaderLockExcludeList(shader);
+        }
+
+        /// <summary>
+        /// shader 名が lock 対象 (自動: lilToon 派生 / Poiyomi 派生、 加えて <c>ExtraShaderNamesToLock</c> の
+        /// 部分一致) に該当するかだけを判定する。 除外リストは考慮しない。
+        /// null / 空白の shader 名は false。 <see cref="ShouldLockShader"/> の match 判定を切り出したもの。
+        /// </summary>
+        private bool MatchesLockTargetShader(Shader shader)
+        {
             if (shader == null || string.IsNullOrEmpty(shader.name)) return false;
 
-            bool match = false;
             // lilToon 派生は無条件で対象
-            if (shader.name.IndexOf("lilToon", System.StringComparison.OrdinalIgnoreCase) >= 0) match = true;
+            if (shader.name.IndexOf("lilToon", System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
             // Poiyomi 派生も自動対象 (".poiyomi/Poiyomi Toon" 等、Thry-locked 変種 "Hidden/Locked/.poiyomi/..." も拾う)
-            else if (shader.name.IndexOf(".poiyomi/", System.StringComparison.OrdinalIgnoreCase) >= 0) match = true;
-            else if (shader.name.IndexOf("Poiyomi", System.StringComparison.OrdinalIgnoreCase) >= 0) match = true;
-            else
-            {
-                // ユーザー指定の追加対象
-                foreach (var s in ExtraShaderNamesToLock)
-                {
-                    if (string.IsNullOrEmpty(s)) continue;
-                    if (shader.name.IndexOf(s, System.StringComparison.OrdinalIgnoreCase) >= 0) { match = true; break; }
-                }
-            }
-            if (!match) return false;
+            if (shader.name.IndexOf(".poiyomi/", System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            if (shader.name.IndexOf("Poiyomi", System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
 
-            // v0.33.9+: 手動 exclude override (= match を false に倒す)。
-            // lilToon カスタムシェーダー (BoundBonePro lilToonSquish 等) で pink バグが起きる場合の救済策。
-            // shader-lock を skip → BlendShape lock + texture 非暗号化にフォールバック。
+            // ユーザー指定の追加対象
+            foreach (var s in ExtraShaderNamesToLock)
+            {
+                if (string.IsNullOrWhiteSpace(s)) continue;
+                if (shader.name.IndexOf(s, System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// v0.33.9+: shader 名が手動 exclude リスト (<see cref="ExcludeFromShaderLock"/>) に部分一致するかを判定する。
+        /// IsNullOrWhiteSpace のエントリは skip、 照合は IndexOf OrdinalIgnoreCase。
+        /// lilToon カスタムシェーダー (BoundBonePro lilToonSquish 等) で pink バグが起きる場合の救済 override 用。
+        /// </summary>
+        private bool MatchesShaderLockExcludeList(Shader shader)
+        {
+            if (shader == null || string.IsNullOrEmpty(shader.name)) return false;
             foreach (var s in ExcludeFromShaderLock)
             {
-                if (string.IsNullOrEmpty(s)) continue;
-                if (shader.name.IndexOf(s, System.StringComparison.OrdinalIgnoreCase) >= 0) return false;
+                if (string.IsNullOrWhiteSpace(s)) continue;
+                if (shader.name.IndexOf(s, System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
             }
-            return true;
+            return false;
+        }
+
+        /// <summary>
+        /// lock 対象 (lilToon/Poiyomi/Extra 一致) だが <c>excludeFromShaderLock</c> で除外された shader のみ true。
+        /// 非対応 shader は false (集計の偽陽性防止)。
+        /// 「lock 対象だが手動除外された」ケースを外部集計コードが正しく判別するための理由付き API。
+        /// </summary>
+        public bool IsShaderLockManuallyExcluded(Shader shader)
+        {
+            return MatchesLockTargetShader(shader) && MatchesShaderLockExcludeList(shader);
         }
 
         public string MeshLockScoreParamName => meshLockScoreParamName ?? "";
