@@ -1,19 +1,33 @@
 name: Build Repo Listing
 
+# index.json is generated from the release zips, never committed. This workflow is
+# therefore the ONLY path allowed to publish the site: any other deployment would ship
+# a Website/ without a listing and silently take the repo offline for every VCC user.
+# (A separate deploy-pages.yml used to do exactly that on any Website/** push.)
+
 on:
   workflow_dispatch:
+    inputs:
+      allow_version_decrease:
+        description: 'Deploy even if the new listing has fewer versions than the live one'
+        type: boolean
+        default: false
   push:
     branches: main
-    paths: source.json
+    paths:
+      - source.json
+      - Website/**
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
+# One Pages deployment at a time, but never cancel one that is already running —
+# a cancelled deployment leaves the published site on an older build than the run implies.
 concurrency:
   group: "pages"
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   listPublishDirectory: Website
@@ -47,6 +61,51 @@ jobs:
         run: ${{env.pathToCi}}/build.cmd BuildMultiPackageListing --root ${{env.pathToCi}} --list-publish-directory $GITHUB_WORKSPACE/${{env.listPublishDirectory}}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify generated listing
+        run: |
+          set -euo pipefail
+          INDEX="$GITHUB_WORKSPACE/${{env.listPublishDirectory}}/index.json"
+
+          if [ ! -f "$INDEX" ]; then
+            echo "::error::index.json was not generated - refusing to deploy a site without a listing"
+            exit 1
+          fi
+
+          SIZE=$(stat -c%s "$INDEX")
+          PKGS=$(jq '.packages | length' "$INDEX")
+          NEW=$(jq '[.packages[].versions | length] | add // 0' "$INDEX")
+          echo "generated listing: $SIZE bytes, $PKGS packages, $NEW versions"
+
+          if [ "$PKGS" -lt 1 ] || [ "$NEW" -lt 1 ]; then
+            echo "::error::listing is empty"
+            exit 1
+          fi
+
+          # A four-package listing is well under 100 KB. Runaway size means a package.json
+          # field is corrupted - CP932 mojibake in legacyFolders once grew this file to 37 MB.
+          if [ "$SIZE" -gt 5242880 ]; then
+            echo "::error::index.json is $SIZE bytes (over 5 MiB) - refusing to deploy, inspect package.json inside each release zip"
+            exit 1
+          fi
+
+          if [ "${{ inputs.allow_version_decrease || 'false' }}" = "true" ]; then
+            echo "::notice::version-count regression check skipped by request"
+            exit 0
+          fi
+
+          # Losing a version means a release asset went missing; publishing that would
+          # break installs for anyone pinned to it.
+          if curl -sfL --max-time 30 "$(jq -r '.url' "$INDEX")" -o live-listing.json; then
+            OLD=$(jq '[.packages[].versions | length] | add // 0' live-listing.json)
+            echo "live listing: $OLD versions"
+            if [ "$NEW" -lt "$OLD" ]; then
+              echo "::error::version count dropped from $OLD to $NEW - a release asset is probably missing. Re-run via workflow_dispatch with allow_version_decrease if this is intended."
+              exit 1
+            fi
+          else
+            echo "::notice::could not fetch the live listing - skipping the regression check"
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
