@@ -4,13 +4,30 @@ using UnityEngine;
 
 namespace AjisaiFlow.AntiRipping
 {
+    /// <summary>画像ごとの暗号化の設定。設計書 §3.3。</summary>
+    [System.Serializable]
+    public sealed class TextureOverride
+    {
+        /// <summary>対象画像の識別子。Editor 側で &lt;guid&gt;:&lt;localId&gt; の形に設定する。</summary>
+        public string guid;
+
+        /// <summary>用途 (shader の prop 名)。空なら、その画像の全ての用途に適用する。</summary>
+        public string propertyName;
+
+        /// <summary>この画像の解像度の上限。0 なら全体の設定に従う。</summary>
+        public int maxResolution;
+
+        /// <summary>0 = 既定、1 = 対象にする、2 = 外す。</summary>
+        public int mode;
+    }
+
     /// <summary>
     /// アバタールートに 1 つだけ貼って使う Editor 専用コンポーネント。
     /// ビルド時に NDMF パスがこのコンポーネントを検出し、設定された保護レイヤーをアバターに焼き込む。
     /// INDMFEditorOnly を実装しているため、ビルド成果物には残らない。
     ///
     /// v0.3: Expression PIN を削除。OSC 経由のキー配送に一本化。
-    /// 鍵はユーザーが Inspector の「鍵を作成」ボタンを押した時点で生成・永続化される。
+    /// 鍵はユーザーが Inspector の「鍵を今すぐ作成」ボタンを押した時点で生成・永続化される。
     /// 同じ鍵が複数ビルドにまたがって使われるため、再ビルドで OSC のやり直しは不要。
     /// </summary>
     [AddComponentMenu("紫陽花広場/VRChat Anti-Ripping (NDMF Script)")]
@@ -18,6 +35,52 @@ namespace AjisaiFlow.AntiRipping
     [DefaultExecutionOrder(-9000)]
     public sealed class AntiRippingTag : MonoBehaviour, INDMFEditorOnly
     {
+        /// <summary>テクスチャ暗号化で選択できる解像度の段階。</summary>
+        public static readonly int[] TextureResolutionSteps =
+            { 64, 128, 256, 512, 1024, 2048, 4096, 8192 };
+
+        /// <summary>Fallback placeholder で選択できる解像度の段階。</summary>
+        public static readonly int[] PlaceholderResolutionSteps =
+            { 16, 32, 64, 128, 256 };
+
+        /// <summary>任意の解像度を最も近いテクスチャ解像度の段階へ丸める。</summary>
+        public static int SnapTextureResolution(int value)
+        {
+            int nearest = TextureResolutionSteps[0];
+            long nearestDistance = long.MaxValue;
+            for (int i = 0; i < TextureResolutionSteps.Length; i++)
+            {
+                long distance = value - (long)TextureResolutionSteps[i];
+                if (distance < 0L) distance = -distance;
+                if (distance < nearestDistance)
+                {
+                    nearest = TextureResolutionSteps[i];
+                    nearestDistance = distance;
+                }
+            }
+            return nearest;
+        }
+
+        /// <summary>任意の placeholder 解像度を最も近い段階へ丸める。</summary>
+        public static int SnapPlaceholderResolution(int value)
+        {
+            int clamped = Mathf.Clamp(value, PlaceholderResolutionSteps[0],
+                PlaceholderResolutionSteps[PlaceholderResolutionSteps.Length - 1]);
+            int nearest = PlaceholderResolutionSteps[0];
+            long nearestDistance = long.MaxValue;
+            for (int i = 0; i < PlaceholderResolutionSteps.Length; i++)
+            {
+                long distance = clamped - (long)PlaceholderResolutionSteps[i];
+                if (distance < 0L) distance = -distance;
+                if (distance < nearestDistance)
+                {
+                    nearest = PlaceholderResolutionSteps[i];
+                    nearestDistance = distance;
+                }
+            }
+            return nearest;
+        }
+
         // ────────────────────────────── 作者情報 ──────────────────────────────
 
         [Tooltip("ウォーターマークに埋め込む作者名 / ハンドル名 (必須)")]
@@ -31,9 +94,8 @@ namespace AjisaiFlow.AntiRipping
 
         // ────────────────────────────── 追跡保護 (v0.1) ──────────────────────────────
 
-        [Tooltip("全 material に作者ハッシュ float (_AjisaiAR_Hash) を焼き込む。\n" +
-                 "shader 動作は変わらず、 AssetBundle 内の .mat に build id 由来の hash が残るため、\n" +
-                 "流出 .mat → ProtectionReport (Logs~) の build id 突合で身元証明に使える。")]
+        [Tooltip("全マテリアルにこのビルド固有の作者ハッシュを埋め込みます。見た目や動作は変わりません。\n" +
+                 "流出したマテリアルをレポート (Logs~ フォルダ) の記録と照合し、自分のビルドから出たものだと証明できます。")]
         [SerializeField] private bool enableAssetWatermark = true;
 
         [Tooltip("アバター階層に作者情報を含む不可視 GameObject を散りばめる")]
@@ -42,7 +104,7 @@ namespace AjisaiFlow.AntiRipping
         [Tooltip("ビルドごとに固有 ID を生成し、流出時の追跡に使えるレポートを Assets/紫陽花広場/anti-ripping/Logs~/ に書き出す")]
         [SerializeField] private bool enableBuildFingerprint = true;
 
-        [Tooltip("ビルド終了時に NDMF レポートウィンドウへ難読化サマリ・失敗・スキップ要素を表示する。ONだと毎ビルド後にウィンドウが自動で開く")]
+        [Tooltip("ビルド後に、難読化の結果・失敗・スキップした項目をまとめたレポートウィンドウを自動で開きます。")]
         [SerializeField] private bool showBuildReportInNdmf = true;
 
         // ────────────────────────────── 表示阻止 (v0.2) ──────────────────────────────
@@ -50,33 +112,28 @@ namespace AjisaiFlow.AntiRipping
         // スコープは MeshLockPass の BlendShape 頂点 scramble のみ。
         // shader-level decode (enableShaderLevelDecode) / texture 暗号化 (enableTexturePixelEncryption) /
         // KeyAnimator / OSC sender / Unlock manifest は独立に動作する。
-        [Tooltip("MeshLockPass の BlendShape 頂点散乱 (mesh を locked variant に差し替えて頂点位置を擬似ランダムに変位) を有効化する。\n" +
-                 "OFF: 頂点散乱のみ skip。 shader-level decode / texture 暗号化 / KeyAnimator / OSC sender は\n" +
-                 "それぞれの toggle (enableShaderLevelDecode / enableTexturePixelEncryption) で個別に制御される。\n" +
-                 "頂点散乱を切ると AABB が膨らまない一方、 BlendShape 経路の解錠耐性は失われる。")]
+        [Tooltip("鍵が無いときにメッシュの頂点を散らして形を崩し、正しい鍵で元に戻します。\n" +
+                 "OFF にすると頂点散らしだけを行いません (シェーダー復号・テクスチャ暗号化・解錠処理は各トグルで個別に制御)。\n" +
+                 "頂点を散らさない分アバターの大きさ判定は膨らみませんが、この経路での保護は弱くなります。")]
         [SerializeField] private bool enableMeshLock = true;
 
         [Tooltip("ON: VRChat の保存パラメータに OSC で 1 回書けば次回以降自動復元 (推奨)\n" +
                  "OFF: 毎セッション AntiRippingClient による OSC 送信が必要 (より安全)")]
         [SerializeField] private bool meshLockKeySaved = true;
 
-        [Tooltip("ON (既定): SPS / DPS / TPS など、 シェーダーで頂点を変形する plug mesh を検出し、 Mesh Lock の頂点散乱から自動除外する。\n" +
-                 "これらの mesh は頂点配列を置換されると変形が破綻して散乱するため、 既定で除外して互換性を保つ。\n" +
-                 "検出: VRCFury SPS plug component / SPS・TPS material プロパティ / DPS shader 名。 個別調整は対象 GameObject の\n" +
-                 "Anti-Ripping Scope Override でも可能。\n" +
-                 "注意: 自動除外された plug は Mesh Lock で保護されない (頂点変形保持とのトレードオフ。 SPS と Mesh Lock は原理的に両立不可)。")]
+        [Tooltip("ON (既定): SPS / DPS / TPS など、シェーダーで頂点を変形する plug メッシュを検出し、メッシュロックの頂点散らしから自動で除外します。\n" +
+                 "これらは頂点を置き換えると変形が壊れるため、既定で除外して互換性を保ちます。個別調整は対象 GameObject の Anti-Ripping Scope Override でも可能です。\n" +
+                 "注意: 除外された plug はメッシュロックで保護されません (SPS とは原理的に両立できません)。")]
         [SerializeField] private bool autoExcludeSpsDpsFromMeshLock = true;
 
-        [Tooltip("ON (既定): 検出した SPS / DPS / TPS plug renderer をシェーダーロック (material の locked variant 差し替え) と\n" +
-                 "テクスチャ暗号化からも自動除外する。 VRCFury はビルド時に plug material の shader を patch するため、\n" +
-                 "AR 生成 shader が対象になると TPS はビルド失敗、 SPS は表示異常のリスクがある。\n" +
-                 "plug が body と material を共有している場合は除外しない (body texture の平文化防止、 ログで通知)。\n" +
-                 "注意: 除外された plug の material / texture はリッピング保護されない。")]
+        [Tooltip("ON (既定): 検出した SPS / DPS / TPS plug をシェーダーロックとテクスチャ暗号化からも自動で除外します。\n" +
+                 "VRCFury はビルド時に plug のシェーダーを書き換えるため、保護シェーダーが対象になると TPS はビルド失敗、SPS は表示不具合のリスクがあります。\n" +
+                 "plug が本体とマテリアルを共有している場合は除外しません (本体テクスチャの平文化を防止)。\n" +
+                 "注意: 除外された plug のマテリアル・テクスチャは保護されません。")]
         [SerializeField] private bool autoExcludePlugFromShaderLock = true;
 
-        [Tooltip("解錠キー (16 文字 hex = 64 bit / 8 byte)。Inspector の「鍵を作成」ボタンで生成。\n" +
-                 "鍵が空の場合はビルド時に Mesh Lock がスキップされる (警告ログ)。\n" +
-                 "v0.9 から 32bit → 64bit に拡張 (純粋総当たり耐性 ~1.8×10^19 通り)。")]
+        [Tooltip("解錠キー (16 文字の hex)。Inspector の「鍵を今すぐ作成」ボタンで生成します (未生成でもビルド時に自動生成されます)。\n" +
+                 "鍵が空の場合、ビルド時にメッシュロックはスキップされます (警告ログ)。")]
         [SerializeField] private string meshLockKeyHex = "";
 
         [Tooltip("解錠 OSC パラメータ名 8 つ (v0.9 で 4 → 8 個)。\n" +
@@ -138,42 +195,24 @@ namespace AjisaiFlow.AntiRipping
                  "salt はクリップに埋もれるため、attacker は 1 つの expected 値から 8 個の鍵を逆算する必要がある。")]
         [SerializeField] private byte[] meshLockSalts = new byte[0];
 
-        [Tooltip("v0.13+: シェーダーレベル復号 (default: ON)。\n" +
-                 "lilToon / Poiyomi のソース shader をコピー + textual injection で locked variant を生成し、\n" +
-                 "shader 内でテクスチャを復号する (_AR_TK0..3 駆動の LIL_SAMPLE_2D wrapper 経路)。\n" +
-                 "見た目は元 shader (lilToon / Poiyomi) と完全に同じまま、\n" +
-                 "AnimatorController を解析されても鍵は露出しない。\n" +
-                 "テクスチャ暗号化 (enableTexturePixelEncryption) はこのトグルとの AND で有効になる。\n" +
-                 "v0.37.2 以降、 lilToon の locked variant は頂点 (mesh) 復号を行わない (_AR_K0..3 は dead uniform)。\n" +
-                 "mesh の散乱と復元は MeshLockPass の BlendShape Unlock が担う (Poiyomi のみ頂点復号を持つ)。\n" +
-                 "対応 shader が無い material は shader-lock 対象外 (元 material 維持)。\n" +
-                 "OFF にすると BlendShape lock のみで保護され、 テクスチャ暗号化も動かない。")]
+        [Tooltip("lilToon / Poiyomi のマテリアルを、見た目はそのままに、解錠処理をシェーダー内部で行う保護版に差し替えます (既定 ON)。\n" +
+                 "鍵がアニメーターに現れないため解析されにくくなります。lilToon での役割はテクスチャの復号です (メッシュの散らし・復元はメッシュロックが担当します)。\n" +
+                 "対応していないシェーダーのマテリアルはそのまま維持されます。\n" +
+                 "OFF にするとメッシュ側の保護だけになり、テクスチャ暗号化も無効になります。")]
         [SerializeField] private bool enableShaderLevelDecode = true;
 
-        [Tooltip("v0.37+: MeshRenderer を SkinnedMeshRenderer に build 時に型変換し、 BlendShape 経路で\n" +
-                 "mesh-level scramble する。 MR の Safety Mode 対応 (= custom shader 無効化時も形状復元) が完全化される。\n" +
-                 "対象: lockable shader (lilToon / Poiyomi 系) を持つ MeshRenderer のみ。 非対応 shader の MR は変換されない。\n" +
-                 "変換ロジック: Mesh を clone + 全頂点 weight=1.0 で root bone bind + bindposes=identity +\n" +
-                 "SMR component 追加 (Renderer base prop 完全コピー) + 元 MR/MeshFilter Destroy。\n" +
-                 "副作用: VRChat Performance Stat の SMR 数が増え、 Rank downgrade のリスクあり (Quest では特に影響大)。\n" +
-                 "build 時に Rank 計算し downgrade した場合は ARLog.Warn で警告ログ出力。\n" +
-                 "default OFF (= opt-in)。 Quest 向け build にも適用される (ユーザー責任で判断)。")]
+        [Tooltip("MeshRenderer をビルド時に SkinnedMeshRenderer へ変換し、メッシュロックで保護できるようにします。\n" +
+                 "VRChat のセーフティ (カスタムシェーダー無効化) 時も形状が正しく復元されます。対象は lilToon / Poiyomi 系シェーダーを持つ MeshRenderer のみです。\n" +
+                 "副作用: SkinnedMeshRenderer が増え、Performance Rank が下がる場合があります (特に Quest)。既定 OFF。")]
         [SerializeField] private bool enableMeshRendererToSkinnedConversion = false;
 
-        [Tooltip("Shader-level Decode で追加でロック対象に含めたい shader 名 (部分一致、大文字小文字無視)。\n" +
-                 "例: 'XSToon'、'Sunao'。\n" +
-                 "lilToon / Poiyomi 派生は自動検出されるのでここに書く必要は無い。\n" +
-                 "(現状の injector は lilToon と Poiyomi のみ対応。それ以外の shader は\n" +
-                 " 注入失敗 → BlendShape lock にフォールバック。)")]
+        [Tooltip("自動検出される lilToon / Poiyomi 以外に、保護対象へ含めたいシェーダー名を追加します (一部一致、大文字小文字は無視)。例: 'XSToon'、'Sunao'。\n" +
+                 "現在対応しているのは lilToon と Poiyomi のみで、それ以外を指定した場合はメッシュ側の保護に切り替わります。")]
         [SerializeField] private string[] extraShaderNamesToLock = new string[0];
 
-        [Tooltip("v0.33.9+: Shader-Lock の対象から **除外** する shader 名 (部分一致、 大文字小文字無視)。\n" +
-                 "lilToon カスタムシェーダー (BoundBonePro lilToonSquish 等、 .lilcontainer / .lilblock 経由で\n" +
-                 "生成された派生 shader) で ビルド後 material が pink (shader compile error) になる場合に、\n" +
-                 "shader 名の一部 (例: 'BoundBonePro'、 'lilToonSquish') を追加すると当該 material の shader-lock\n" +
-                 "を skip できる。 skip された material は BlendShape lock + texture 非暗号化で出力される。\n" +
-                 "(自動検出: lilToon 公式 package 配下でない 'lilToon' を含む shader は自動的に skip される。\n" +
-                 " このリストは自動検出で拾えない shader への手動 override。)")]
+        [Tooltip("シェーダー保護の対象から除外するシェーダー名を指定します (一部一致、大文字小文字は無視)。\n" +
+                 "lilToon ベースの特殊シェーダーを使ったマテリアルがビルド後にピンク色になる場合、その名前の一部 (例: 'BoundBonePro') を追加すると除外できます。\n" +
+                 "除外したマテリアルはメッシュ側の保護のみ適用され、テクスチャは暗号化されません。")]
         [SerializeField] private string[] excludeFromShaderLock = new string[0];
 
         // v0.37.8: テクスチャ暗号化からマテリアル単位で除外する list。
@@ -181,62 +220,57 @@ namespace AjisaiFlow.AntiRipping
         // skip される (= 元 texture が AssetBundle に焼かれて leak 可能、 visual は安定)。
         // 用途: MatCap 等の微調整 texture で暗号化精度損失が visual に影響する material を leak 許容で除外したいケース。
         // 元 (src) material reference で比較する (= avatar prefab に貼られている original material)。
-        [Tooltip("v0.37.8+: テクスチャ暗号化から除外する material (= leak 許容)。\n" +
-                 "指定した material は shader-lock は通常通り通る (= mesh-level 保護維持) が、 texture pixel\n" +
-                 "encryption が skip され、 元テクスチャが AssetBundle にそのまま焼かれる (= AssetRipper で抽出可能)。\n" +
-                 "用途: MatCap 等の微調整テクスチャで暗号化精度損失による visual 違和感を leak 許容で回避したいケース。\n" +
-                 "重要: 列挙した material の **全テクスチャ** が leak 対象になる。 main color texture も含まれる場合は\n" +
-                 "保護効果が大幅に下がるため慎重に検討してください。")]
+        [Tooltip("テクスチャ暗号化から除外するマテリアルを指定します (そのテクスチャは抜き取られる可能性を許容)。\n" +
+                 "メッシュの保護は通常どおり効きますが、テクスチャは暗号化されず元の画像がそのまま書き出されます。\n" +
+                 "用途: MatCap など、暗号化による見た目の変化が気になるマテリアル。\n" +
+                 "重要: 指定したマテリアルの全テクスチャが対象です。メインの色テクスチャを含む場合は保護効果が大きく下がるため慎重に選んでください。")]
         [SerializeField] private Material[] excludeFromTextureEncryption = new Material[0];
+
+        // v0.51: テクスチャ (Texture2D asset) 単位でテクスチャ暗号化から除外する list。
+        // material 単位除外 (excludeFromTextureEncryption) が material 内の **全テクスチャ** を外すのに対し、 こちらは
+        // material 内の **特定 texture asset 1 枚だけ** を暗号化から外せる (= その texture が使われている他 prop / 他
+        // material でも一律 skip される。 元 (src) texture asset の reference で比較)。
+        // 除外された texture は平文で AssetBundle に焼かれて leak 許容になるが、 shader-lock / mesh 保護は不変。
+        // include-only モードとの関係も material 除外と同じで、 除外は常に優先する (include 指定 material 内でも除外
+        // 指定した texture は暗号化しない)。
+        // 用途: MatCap・グラデ等、 暗号化の精度損失が visual に出る texture を「1 枚だけ」leak 許容で外したいケース。
+        [Tooltip("テクスチャ暗号化から外す個別のテクスチャを 1 枚単位で指定します (そのテクスチャは抜き取られる可能性を許容)。\n" +
+                 "マテリアル単位の除外と違い、同じマテリアル内でも指定した 1 枚だけを平文のまま書き出せます。メッシュ・シェーダーの保護は変わりません。\n" +
+                 "用途: MatCap・グラデーションなど、暗号化による見た目の変化が気になるテクスチャ。\n" +
+                 "ホワイトリスト指定より常に優先されます。")]
+        [SerializeField] private Texture2D[] excludeTexturesFromEncryption = new Texture2D[0];
 
         // v0.42: テクスチャ暗号化の whitelist (include-only) モード。
         // ON のとき、 textureEncryptionIncludeMaterials に列挙した material **だけ** を暗号化し、 それ以外は
         // 全て暗号化 skip する (= leak 許容)。 「頭と体だけ暗号化したい」等、 除外リストに大量列挙する手間を省く。
         // OFF (既定) のときは従来の blacklist (excludeFromTextureEncryption) 動作。
         // exclude リストは include-only でも優先される (include かつ exclude の material は skip = exclude が勝つ)。
-        [Tooltip("v0.42+: ON にすると『含めた material だけ』テクスチャ暗号化する (whitelist モード)。\n" +
-                 "頭・体だけ暗号化したい等、 除外リストに大量入力する手間を省ける。\n" +
-                 "重要: ここに入れなかった material のテクスチャは全て暗号化されず AssetBundle に残る (= 抽出可能)。\n" +
-                 "OFF (既定) のときは従来どおり『除外リスト以外を全て暗号化』する blacklist 動作。")]
+        [Tooltip("ON にすると、下のリストに入れたマテリアルだけテクスチャ暗号化します (ホワイトリスト方式)。「頭と体だけ暗号化したい」等で、除外リストに大量入力する手間を省けます。\n" +
+                 "重要: リストに無いマテリアルのテクスチャは暗号化されず AssetBundle に残ります (抽出可能)。\n" +
+                 "OFF (既定) では、除外リスト以外を全て暗号化します。")]
         [SerializeField] private bool textureEncryptionIncludeOnly = false;
 
-        [Tooltip("v0.42+: include-only モード ON のとき、 暗号化する material をここに列挙する。\n" +
-                 "元 (src) material reference で指定 (avatar prefab に貼られている material)。\n" +
-                 "ここに無い material はテクスチャ暗号化されない (shader-lock / mesh 保護は別 toggle のまま動く)。")]
+        [Tooltip("ホワイトリスト方式が ON のとき、暗号化するマテリアルをここに列挙します。\n" +
+                 "ここに無いマテリアルのテクスチャは暗号化されません (メッシュ保護は別トグルのまま効きます)。")]
         [SerializeField] private Material[] textureEncryptionIncludeMaterials = new Material[0];
 
         // ────────────────────────────── Texture Pixel Encryption (v0.31, 実験的) ──────────────────────────────
 
-        [Tooltip("v0.31+ (実験的、 default OFF): lilToon material の主要 texture を CPU 側で XOR PRNG (LCG)\n" +
-                 "ストリーム暗号化し、 AssetBundle に焼き込まれる texture asset 自体を完全 noise 化する。\n" +
-                 "shader 内で K0..K3 の鍵が一致したときのみ runtime 復号して描画 (lilToon の OVERRIDE_* macro hook 経由)。\n" +
-                 "AssetRipper で抽出した PNG は noise として保存され、 元画像復元には injected shader 一式\n" +
-                 "(= avatar build 成果物) が必要になる。\n" +
-                 "制約 (v0.31.x): lilToon のみ。 multi-material renderer は asset-only path で全 slot 暗号化\n" +
-                 "(visible texture lock は無し、 mesh は BlendShape lock で scramble)、\n" +
-                 "Safety mode (Custom Shader OFF) では noise 表示のまま (= 仕様)。\n" +
-                 "副作用: 圧縮 texture (BC7/DXT5) が RGBA32 に変換 → AssetBundle サイズが約 4 倍に膨張する。\n" +
-                 "v0.30 UV scramble の撤回経緯と v0.23 致死バグ (SetTexture が locked variant shader を破壊) の\n" +
-                 "リスクをふまえ、 default OFF (opt-in)。 安定確認後 v0.32 で default ON 化を検討。")]
+        [Tooltip("lilToon マテリアルの主要テクスチャを暗号化し、AssetBundle 内のテクスチャをノイズ化します。正しい鍵が送られたときだけアバター内部で復号して表示します。抜き取った画像はノイズにしか見えません (既定 OFF、実験的)。\n" +
+                 "対応は lilToon のみ。1 メッシュに複数マテリアルがある場合やセーフティ表示中はノイズのまま表示されます (仕様)。\n" +
+                 "暗号化した画像は圧縮が効かないため、ダウンロード容量が大きく増えます。ビルド時に容量を見積もり、VRChat の上限を超えるときは警告し、確実に超える場合はアップロードを止めます。")]
         [SerializeField] private bool enableTexturePixelEncryption = false;
 
-        [Tooltip("master が ON のとき有効: _MainTex (diffuse base) を暗号化する。\n" +
-                 "RGB チャネルに XOR (alpha は cutout edge 保護のため触らない)。")]
+        [Tooltip("テクスチャ暗号化が ON のとき有効: メインの色テクスチャ (_MainTex) を暗号化します (透明部分の縁を保つため不透明度には手を付けません)。")]
         [SerializeField] private bool encryptMainTex = true;
 
-        [Tooltip("master が ON のとき有効: _NormalMap (法線) を暗号化する。\n" +
-                 "Unity の DXT5nm packing (BA に法線 X/Y) を尊重し、 RG channel のみに XOR。\n" +
-                 "v0.31.0 (MVP) では未実装。 v0.31.x で対応予定。")]
+        [Tooltip("テクスチャ暗号化が ON のとき有効: 法線マップ (_NormalMap) を暗号化します。")]
         [SerializeField] private bool encryptNormalMap = true;
 
-        [Tooltip("master が ON のとき有効: _Main2ndTex (secondary color layer) を暗号化する。\n" +
-                 "_MainTex と同じ RGB XOR。\n" +
-                 "v0.31.0 (MVP) では未実装。 v0.31.x で対応予定。")]
+        [Tooltip("テクスチャ暗号化が ON のとき有効: 2nd カラーレイヤー (_Main2ndTex) を暗号化します。")]
         [SerializeField] private bool encryptMain2nd = true;
 
-        [Tooltip("master が ON のとき有効: _AlphaMask (transparency) を暗号化する。\n" +
-                 "R channel のみに XOR (G/B/A は意味を持たない)。\n" +
-                 "v0.31.0 (MVP) では未実装。 v0.31.x で対応予定。")]
+        [Tooltip("テクスチャ暗号化が ON のとき有効: 透明度マスク (_AlphaMask) を暗号化します。")]
         [SerializeField] private bool encryptAlphaMask = true;
 
         // v0.31.14 revert: encryptEmissionMap toggle は v0.31.13 で導入したが、
@@ -245,187 +279,112 @@ namespace AjisaiFlow.AntiRipping
         // → 全 texture 露出という致死 regression を起こしたため、 spec entry / 専用 builder と一緒に撤去。
         // serialized field 自体も削除 (= v0.31.13 で保存された値は次の Save Project で消える、 機能無効のため無害)。
 
-        [Tooltip("暗号化 texture の最大解像度 (px、 縦横の長辺)。 これを超える元 texture は GPU Blit で\n" +
-                 "downsample してから暗号化する。 AssetBundle サイズ膨張対策。\n" +
-                 "・XOR PRNG decode は非可逆圧縮 (BC7/DXT5) と原理的に両立できないため encrypted texture は\n" +
-                 "  必ず RGBA32 (= 4 byte/pixel) で保存する必要がある。\n" +
-                 "・default 2048: 1K/2K texture はそのまま、 4K texture のみ 2K に downsample (4× サイズ削減)。\n" +
-                 "・1024 にすると 2K も downsample されてアグレッシブに削減できるが、 顔/肌の精細度が落ちる。\n" +
-                 "・8192 にすると downsample 無効化 (全 texture 元解像度のまま)。\n" +
-                 "サイズ目安: 4K RGBA32 = 64 MB、 2K RGBA32 = 16 MB、 1K RGBA32 = 4 MB")]
-        [Range(256, 8192)]
+        [Tooltip("暗号化するテクスチャの最大解像度 (長辺、px)。これを超えるテクスチャは縮小してから暗号化し、AssetBundle 容量の増加を抑えます。\n" +
+                 "・既定 2048: 1K/2K はそのまま、4K のみ 2K に縮小。\n" +
+                 "・容量目安: 4K = 64 MB、2K = 16 MB、1K = 4 MB。")]
+        [Range(64, 8192)]
         [SerializeField] private int textureEncryptionMaxResolution = 2048;
 
-        // ── v0.34.7: Fallback shader 用 placeholder (= VRChat Safety で shader fallback 中の他 user に低解像度 preview を見せる) ──
-        [Tooltip("v0.34.7: VRChat Safety で shader fallback 中の他ユーザーに低解像度の placeholder texture を表示する。\n" +
-                 "OFF の場合、 fallback shader 利用者は暗号化済 noise を albedo として描画してしまう (旧挙動)。\n" +
-                 "ON の場合、 _MainTex slot に低解像度 placeholder を bind し、 暗号化済 RGBA32 は別 property\n" +
-                 "(_AR_Enc_MainTex) に格納される。 locked variant shader は _AR_Enc_MainTex を読むため見た目変化なし。\n" +
-                 "default ON 推奨 (体験改善 vs わずかな VRAM 増のトレードオフ)。")]
-        [SerializeField] private bool showFallbackPlaceholder = true;
+        /// <summary>画像ごとの暗号化設定。Editor 側で画像の識別子を解決して使用する。</summary>
+        [SerializeField] private TextureOverride[] textureOverrides = new TextureOverride[0];
 
-        [Tooltip("v0.34.7: Fallback placeholder texture の解像度 (px)。\n" +
-                 "・16: モザイク状、 シルエット判別困難 (protection 最大)\n" +
-                 "・64 (default): ぼやけシルエット視認可、 protection と体験の妥協点\n" +
-                 "・256: ほぼ判別可能、 protection 効果が薄れる\n" +
-                 "VRAM 影響: 64x64 RGBA32 で +16 KB / texture (無視できる)。")]
+        // ── v0.34.7: Fallback shader 用 placeholder (= VRChat Safety で shader fallback 中の他 user に低解像度 preview を見せる) ──
+        // UI からは削除済み。過去のシーンデータを読み込むためフィールドだけ残し、値は参照しない。
+        [Tooltip("VRChat のセーフティでシェーダーが無効化された相手には、低解像度のぼかし画像を表示します。正規に解錠している相手の見た目には影響しません。")]
+#pragma warning disable 0414
+        [SerializeField] private bool showFallbackPlaceholder = true;
+#pragma warning restore 0414
+
+        [Tooltip("ぼかし画像の解像度 (px)。\n" +
+                 "・16: モザイク状 (保護が最も強い)\n" +
+                 "・64 (既定): ぼやけたシルエット\n" +
+                 "・256: ほぼ判別可能 (保護効果は薄い)")]
         [Range(16, 256)]
         [SerializeField] private int fallbackPlaceholderResolution = 64;
 
         // ── v0.34.0+: Universal LIL_SAMPLE_* wrapper category groups ──
 
-        [Tooltip("v0.34.11 Stage 1 で activate: Mask group (single-channel mask ~17 prop) を一括暗号化対象にする。\n" +
-                 "対象: _MainColorAdjustMask, _Main{2,3}rdBlendMask, _Main{2,3}rdDissolveMask, _MatCapBlendMask,\n" +
-                 "      _OutlineWidthMask, _ShadowBorderMask, _ShadowBlurMask, _RimShadeMask, _DissolveMask,\n" +
-                 "      _FurNoiseMask, _FurMask, _FurLengthMask, _AnisotropyScaleMask 等。\n" +
-                 "skip (Stage 1): _MetallicGlossMap, _SmoothnessTex, _GlitterShapeTex, _TriMask (channel pack 系) /\n" +
-                 "                _ParallaxMap (height map 誤分類)。\n" +
-                 "default ON (Stage 1 安全範囲、 既存 v0.34.10 user は serialized field 値を維持)。")]
+        [Tooltip("各種のマスクテクスチャ (ブレンド・ディゾルブ・アウトライン幅・影・ファーなど約 17 種) をまとめて暗号化します。\n" +
+                 "メタリック・滑らかさ・視差マップなどは構造上の都合で対象外です。既定 ON。")]
         [SerializeField] private bool encryptMaskGroup = true;
 
-        [Tooltip("v0.34.11 Stage 1 で activate: Color group (sRGB color ~9 prop) を一括暗号化対象にする。\n" +
-                 "対象: _MainGradationTex, _OutlineTex, _Shadow{1,2,3}ColorTex, _BacklightColorTex, _ReflectionColorTex,\n" +
-                 "      _MatCap{1,2}Tex, _RimColorTex, _GlitterColorTex。\n" +
-                 "skip (Stage 1): _Main2ndTex / _Main3rdTex (= face decal、 lilGetSubTex 経由で v0.34.2 alpha 全失敗、\n" +
-                 "               Stage 3 R&D 待ち)。\n" +
-                 "default ON (Stage 1 安全範囲、 既存 v0.34.10 user は serialized field 値を維持)。")]
+        [Tooltip("各種の色テクスチャ (アウトライン・MatCap・影・逆光・反射・ラメ・グラデーションなど約 9 種) をまとめて暗号化します。\n" +
+                 "顔のデカール (2nd / 3rd レイヤー) は構造上の都合で対象外です。既定 ON。")]
         [SerializeField] private bool encryptColorGroup = true;
 
-        [Tooltip("v0.34.11 Stage 1 で activate: Normal group (法線 ~6 prop) を一括暗号化対象にする。\n" +
-                 "対象: _Bump2ndMap, _MatCapBumpMap, _MatCap2ndBumpMap, _AnisotropyTangentMap, _OutlineVectorTex,\n" +
-                 "      _FurVectorTex。\n" +
-                 "default ON (Stage 1 安全範囲、 既存 v0.34.10 user は serialized field 値を維持)。")]
+        [Tooltip("各種の法線マップ (2nd・MatCap 用・アウトライン用・ファー用など約 6 種) をまとめて暗号化します。既定 ON。")]
         [SerializeField] private bool encryptNormalGroup = true;
 
-        [Tooltip("v0.34.4+ で activate: Emission group (発光 5 prop) を一括暗号化対象にする。\n" +
-                 "対象: _EmissionMap, _Emission2ndMap, _EmissionGradTex, _Emission2ndGradTex 等。\n" +
-                 "v0.31.13 で OVERRIDE_EMISSION_1ST inline 展開で致死 regression を起こした教訓を踏まえ、\n" +
-                 "v0.34.4 では universal wrapper 方式 (= sample primitive 1 点のみ介入) で実装。\n" +
-                 "lilToon body の context (fd.invLighting / fd.albedo / lilCalcBlink 等) には一切 touch しないため\n" +
-                 "全 lilToon variant (LIL_LITE / MULTI / REFRACTION × Forward / Outline / Meta / Shadow) で互換性 100% 構造保証。\n" +
-                 "default OFF (opt-in、 段階 release で最後に活性化)。")]
+        [Tooltip("発光テクスチャ (約 5 種) をまとめて暗号化します。\n" +
+                 "全 lilToon バリエーションでの検証が終わるまでは、念のため OFF を推奨します。既定 OFF。")]
         [SerializeField] private bool encryptEmissionGroup = false;
 
         // ── v0.34.15 (案 Y): lilToon カスタム派生 shader 互換 mode ──
 
-        [Tooltip("v0.34.15 で activate: lilToon カスタム派生 shader (= shader name に 'lilToon' を含むが asset path が\n" +
-                 "jp.lilxyzw.liltoon 配下でないもの) を使う material を shader-lock / texture encryption の対象から\n" +
-                 "完全 skip する。\n" +
-                 "対象例:\n" +
-                 "  - BoundBonePro lilToonSquish ('Hidden/BoundBonePro/lilToonSquish/*')\n" +
-                 "  - lilToon Inspector の「カスタムシェーダー作成」 で生成された .lilcontainer / .lilblock 派生\n" +
-                 "  - サードパーティ vendor の lilToon 派生 (= custom.hlsl include / lilCustomVertexWS hook 拡張等)\n" +
-                 "これらは公式 lilToon と異なる include 構造 / vertex displacement / 独自 hook を持ち、\n" +
-                 "VRCAAR の lilToon wrapper 注入では shader 生成失敗 → BlendShape lock fallback + nullify safety mode に\n" +
-                 "なり material が真っ白に表示されてしまう (v0.34.13/14 の null 化制御アプローチでは完全復元不可)。\n" +
-                 "本 toggle ON 時、 該当 material は元のまま維持 (= visual 完全復元、 派生機能無傷)。\n" +
-                 "Trade-off: 該当 material の暗号化対象 prop は完全 leak 許容 (= AssetRipper 抽出可能)。\n" +
-                 "公式 lilToon material および Poiyomi material は通常通り暗号化されるため protection は維持。\n" +
-                 "default ON (カスタム派生 shader 利用 avatar での visual 破綻を default で防ぐ)。 false にすると従来挙動\n" +
-                 "(= 該当 material が BlendShape lock fallback + nullify safety mode、 v0.34.12 以前と同等で真っ白になる)。")]
+        [Tooltip("lilToon をベースにした特殊シェーダー (公式 lilToon そのものではなく改造・拡張版) を使うマテリアルを、保護の対象から完全に外します。\n" +
+                 "例: BoundBonePro の lilToonSquish、lilToon の「カスタムシェーダー作成」で作ったもの、他ツールが作った lilToon 派生。\n" +
+                 "これらは元のまま維持され、見た目も機能も保たれます。その代わりテクスチャは暗号化されず抜き取り可能になります。公式 lilToon と Poiyomi は通常どおり暗号化されます。\n" +
+                 "既定 ON (特殊シェーダー使用時に真っ白になるのを防ぎます)。OFF にすると該当マテリアルが真っ白に表示されることがあります。")]
         [SerializeField] private bool skipCustomLilToonDerivatives = true;
 
         // ── Emergency disable switches (build-time、 group-level rollback) ──
-        [Tooltip("v0.34.0+: 緊急時に Mask group を build-time で完全 disable (= group toggle ON でも暗号化 skip)。\n" +
-                 "user が「v0.34.1 以降を入れたら〇〇が崩れた」と報告した際の 1-click partial rollback 用。 default OFF。")]
+        [Tooltip("緊急用: Mask グループの暗号化を強制的に無効化します (グループのトグルが ON でも暗号化しません)。既定 OFF。")]
         [SerializeField] private bool disableMaskGroup = false;
 
-        [Tooltip("v0.34.0+: 緊急時に Color group を build-time で完全 disable。 default OFF。")]
+        [Tooltip("緊急用: Color グループの暗号化を強制的に無効化します。既定 OFF。")]
         [SerializeField] private bool disableColorGroup = false;
 
-        [Tooltip("v0.34.0+: 緊急時に Normal group を build-time で完全 disable。 default OFF。")]
+        [Tooltip("緊急用: Normal グループの暗号化を強制的に無効化します。既定 OFF。")]
         [SerializeField] private bool disableNormalGroup = false;
 
-        [Tooltip("v0.34.0+: 緊急時に Emission group を build-time で完全 disable。 default OFF。")]
+        [Tooltip("緊急用: Emission グループの暗号化を強制的に無効化します。既定 OFF。")]
         [SerializeField] private bool disableEmissionGroup = false;
 
-        [Tooltip("v0.31.12+: texture pixel encryption ON 時、 暗号化対象外の texture 参照 (= _MainTex / _BumpMap / _AlphaMask 以外) を locked variant material から null に剥がす。\n" +
-                 "v0.31.15 改良: visual-critical な property (emission / matcap / outline / rim / 2nd / shadow tinting / detail / glitter / fur 等の major rendering texture) は preserve list で保持される。\n" +
-                 "結果として剥がされるのは: detail mask / id mask / NDMF 一時 等の **minor rendering 用 texture** のみ → 顔白化 / 服色 collapse 等の visual fidelity 損失なし。\n" +
-                 "preserve list 詳細は ShaderLockPass.s_StripPreserveList を参照。\n" +
-                 "効果: build 出力の material asset から minor rendering texture への参照は除去 (= 一部 leak 防止)。 emission / matcap / outline 等の major texture は引き続き material から抽出可能 (= leak risk 残存)。\n" +
-                 "default ON (= 軽量 strip)。 OFF にすると全 texture 参照が material に残る。\n" +
-                 "v0.32 で各 property 専用 OVERRIDE_* macro が完成すれば、 preserve list の texture も暗号化されて strip 対象になる予定。")]
+        [Tooltip("暗号化していないテクスチャへの参照を保護版マテリアルから取り除き、抜き取られないようにします。\n" +
+                 "発光・MatCap・アウトライン・リム・2nd・影・ディテールなど見た目に重要なものは、品質維持のため残します。\n" +
+                 "既定 ON。OFF にすると全テクスチャ参照がマテリアルに残ります。")]
         [SerializeField] private bool stripUnencryptedTextureRefs = true;
 
-        [Tooltip("v0.32: VRCFury が avatar 内に存在する場合、 VRCFury が runtime 動的生成する material/shader は\n" +
-                 "AntiRipping の build-time encryption pipeline を構造的に bypass する。 該当 material は元 texture が leak する。\n" +
-                 "この flag を ON にすると VRCFury 検出時の build error / warning を抑制し、 leak risk を user が明示承認した扱いになる。\n" +
-                 "default OFF: VRCFury 検出時に build を停止し、 user に leak risk を明示通知する。")]
+        [Tooltip("VRCFury がアバター実行時に生成するマテリアル/シェーダーは、ビルド時の暗号化が効かず、テクスチャが抜き取られる可能性があります。\n" +
+                 "既定 OFF: VRCFury を検出すると警告を表示します (ビルドは続行)。ON にするとその点を承知したものとして警告を出しません。")]
         [SerializeField] private bool acknowledgeVRCFuryLeak = false;
 
-        [Tooltip("v0.17+: ビルド時に Renderer GameObject 名をランダム文字列 (_16hex) に置換する。\n" +
-                 "AssetRipper で抽出された avatar の Unity Project で「どれが顔/髪/服か」を識別困難にする。\n" +
-                 "Humanoid bone は対象外 (Avatar binding 破壊回避)。\n" +
-                 "AnimationClip の path binding は NDMF AnimatorServicesContext で自動 remap される。\n" +
-                 "副作用: Hierarchy / Inspector で当該 GO を後追いするのが debug 困難になる。")]
+        [Tooltip("ビルド時に Renderer の GameObject 名をランダムな文字列に置き換えます。抜き取られたアバターで、どれが顔・髪・服かを分かりにくくします。\n" +
+                 "Humanoid ボーンは対象外です (アバターが壊れるのを回避)。\n" +
+                 "副作用: Hierarchy / Inspector で対象を追いにくくなります。")]
         [SerializeField] private bool enableGameObjectObfuscation = false;
 
-        [Tooltip("v0.19+: ビルド時に各 SkinnedMeshRenderer の sharedMesh の **BlendShape 名そのもの** を\n" +
-                 "_<16hex> にランダム rename する。 順序 (index) は維持するため index ベース binding は無傷。\n" +
-                 "AnimationClip / VRC Viseme / MA ShapeChanger / BlendshapeSync の name 形式参照は全て同期 rewrite。\n" +
-                 "AssetRipper 抽出時に「Smile_L」「vrc.v_aa」等の意味のある名前が消える (Decoy より強力)。\n" +
-                 "GameObject 難読化と同じく NDMF AnimatorServicesContext 経由で全 plugin の clip も rewrite される。")]
+        [Tooltip("ビルド時に BlendShape (シェイプキー) の名前をランダムな文字列に置き換えます。順序は維持され、アニメーションや各種ツールからの参照も自動で同期されるためギミックは壊れません。\n" +
+                 "抜き取り時に「Smile_L」「vrc.v_aa」等の意味のある名前が消えます。")]
         [SerializeField] private bool enableBlendShapeObfuscation = false;
 
-        [Tooltip("v0.37+: BlendShape 難読化 ON 時に MMD ワールド用の標準モーフ (= あ / い / う / え / お / ω / にこり / まばたき / ハイライト消し 等) を\n" +
-                 "rename 対象から除外する (= 順序シャッフルには参加するが名前は元のまま維持される)。\n" +
-                 "MMD DanceController は BlendShape 名で SetBlendShapeWeight を呼ぶため、 rename されると MMD ワールドで表情が動かなくなる。\n" +
-                 "また 「-------MMD-------」「=======MMD=======」 等の section divider (= 名前に「MMD」 を含む BS) も自動的に除外される。\n" +
-                 "default ON (= MMD 互換性を確保)。 OFF にすると従来挙動 (= 全 BS rename、 MMD 表情が壊れる) になる。")]
+        [Tooltip("BlendShape 難読化が ON のとき、MMD ワールド用の標準モーフ (あ / い / う / まばたき等) を名前の置き換えから除外します (順序シャッフルには参加します)。\n" +
+                 "MMD ワールドは BlendShape 名で表情を動かすため、除外しないと表情が動かなくなります。名前に「MMD」を含む区切り行も自動で除外されます。既定 ON。")]
         [SerializeField] private bool excludeMmdBlendShapes = true;
 
-        [Tooltip("v0.21+: ビルド時に AnimatorController の Layer 名 / State 名 / StateMachine 名 / Parameter 名を\n" +
-                 "_<16hex> にランダム rename する。 Transition condition / VRCAvatarParameterDriver / VRCExpressionParameters /\n" +
-                 "VRCExpressionsMenu / MA ModularAvatarParameters の参照は全て同期 rewrite される。\n" +
-                 "VRC client 必須 parameter (Viseme / Voice / Gesture / IsLocal 等) と anti-ripping 自身の鍵関連 parameter\n" +
-                 "(K0..K7 / LockNow / Broadcast / Score / One) は rename 対象から除外され機能に影響しない。\n" +
-                 "Optimizing phase で実行されるため MA / FaceEmo / lilycal-Inventory 等の controller も全て覆われる。")]
+        [Tooltip("ビルド時にアニメーターのレイヤー名・ステート名・パラメーター名をランダムな文字列に置き換え、参照も自動で同期します。\n" +
+                 "VRChat が必須とするパラメーター (Viseme / Gesture / IsLocal 等) と解錠用パラメーターは対象外なので、機能には影響しません。")]
         [SerializeField] private bool enableAnimatorObfuscation = false;
 
-        [Tooltip("v0.37+: Animator パラメータ難読化 ON 時に VRCOSC (心拍計 / SpeechToText 等の外部 OSC アプリ) が\n" +
-                 "書き込むパラメータ (= 名前が「VRCOSC/」 で始まるもの、 例: VRCOSC/Heartrate/Average 等) を\n" +
-                 "rename 対象から除外する。\n" +
-                 "VRCOSC アプリは外部から OSC で /avatar/parameters/VRCOSC/Heartrate/Average 等を送信するため、\n" +
-                 "rename されると avatar 側で受信できず心拍計などが機能停止する。\n" +
-                 "default ON (= VRCOSC 互換性を確保)。 OFF にすると従来挙動 (= 全 param rename、 VRCOSC が壊れる)。")]
+        [Tooltip("パラメーター難読化が ON のとき、VRCOSC (心拍計・音声認識などの外部 OSC アプリ) が使うパラメーター (名前が「VRCOSC/」で始まるもの) を置き換えから除外します。\n" +
+                 "除外しないと心拍計などが機能停止します。既定 ON。")]
         [SerializeField] private bool excludeVrcOscParameters = true;
 
-        [Tooltip("v0.36+: ON で Animator パラメータ難読化を決定論的 (再現可能) にする。\n" +
-                 "同じ元パラメータ名は常に同じ難読名になり、PC と Quest を別々にビルドしても一致する。\n" +
-                 "enableAnimatorObfuscation が ON のときのみ効果あり。 既定 OFF (ビルド毎ランダム)。")]
+        [Tooltip("ON にするとパラメーター難読化を再現可能にします。同じ元の名前は常に同じ難読名になり、PC と Quest を別々にビルドしても一致します。\n" +
+                 "パラメーター難読化が ON のときのみ効果があります。既定 OFF (ビルドごとにランダム)。")]
         [SerializeField] private bool deterministicObfuscation = false;
 
-        [Tooltip("決定論的難読化の安定シード (32 文字 hex)。 トグル ON 時に Inspector が自動生成。\n" +
-                 "PC/Quest を別 prefab で作る場合は両 prefab に同じ値を設定する。")]
+        [Tooltip("再現可能な難読化のためのシード (32 文字の hex)。トグル ON 時に自動生成されます。\n" +
+                 "PC/Quest を別々の prefab で作る場合は、両方に同じ値を設定してください。")]
         [SerializeField] private string obfuscationSeedHex = "";
 
-        [Tooltip("v0.23+: avatar が参照する Mesh / Material / AnimationClip / AvatarMask の\n" +
-                 "**アセット名そのもの** を _<16hex> にランダム rename する。\n" +
-                 "v0.25+: AnimatorController アセット名も対象。\n" +
-                 "v0.28+: VRCExpressionsMenu (再帰) / VRCExpressionParameters のアセット名も対象。\n" +
-                 "AssetRipper 抽出時に「Mesh_Body」「Smile_Anim」「MainMenu」等の意味のある名前が消え、\n" +
-                 "GameObject / BlendShape / Animator 難読化と組み合わせて抽出物全体が _<16hex> で埋まり識別困難に。\n" +
-                 "元 prefab アセットは Object.Instantiate で deep clone されてから rename されるため非破壊。\n" +
-                 "Shader は Shader.Find('lilToon') 等の name 依存があるため対象外。\n" +
-                 "Texture は NDMF 一時 (AAO Atlas 等) のみ rename、 元 prefab は rename しない\n" +
-                 "(= shader-level decode を壊す致死バグ防止)。")]
+        [Tooltip("ビルド時に、アバターが参照するメッシュ・マテリアル・アニメーションなどのアセット名をランダムな文字列に置き換えます。抜き取り時に「Mesh_Body」「Smile_Anim」等の意味のある名前が消えます。\n" +
+                 "元のアセットは複製してから変更するので壊れません。シェーダーとテクスチャは対象外です (保護を壊さないため)。")]
         [SerializeField] private bool enableAssetNameObfuscation = false;
 
-        [Tooltip("v0.18+: ビルド時に各 SkinnedMeshRenderer の sharedMesh 末尾に dummy BlendShape を\n" +
-                 "ランダム数 (32〜64 個) 追加し、 AssetRipper で抽出された mesh で本物の Viseme/表情/装飾の\n" +
-                 "BlendShape が「意味不明な _<16hex> dummy 群」に紛れて識別困難になる。\n" +
-                 "本物の BlendShape は名前・順序・index を完全保存するため、 Animator / MA / FaceEmo / AAO\n" +
-                 "等の参照は string・index 両形式とも全く無傷 (= ギミックは絶対に壊れない)。\n" +
-                 "v0.26+: dummy の delta は「元 mesh の既存 BlendShape をランダムに 1 つ選び、\n" +
-                 "ランダム係数 ∈ [-1.5,-0.3]∪[0.3,1.5] でスケール」したものを使用するため、\n" +
-                 "本物と同じ性質の delta になり、 「全頂点 0」フィルタでの bulk 識別が不能になる。\n" +
-                 "v0.27.4+: dummy の SMR weight 分布は「20% で {0, 100, [0,100] 連続乱数} 3 択 + 80% で [0,100] 整数乱数」。\n" +
-                 "結果として weight=0 ~7.5%、 weight=100 ~7.5%、 その他 (整数+小数) ~85% で、\n" +
-                 "Inspector の BlendShape リストの「末尾 _<16hex> が全部 0」 block が消え、\n" +
-                 "「on/off 設定」+「微調整」+「ランダム整数」が混じる本物っぽい分布になる。\n" +
-                 "weight 非 0 dummy は delta=0 で形状不変を保証 (~7.5% の weight=0 dummy のみ varied delta)。\n" +
-                 "副作用: mesh ファイルサイズは source BlendShape のスパース性に依存 (顔表情なら 1 dummy あたり数 KB〜数十 KB)。")]
+        [Tooltip("ビルド時に、各メッシュにダミーの BlendShape をランダムな数 (32〜64 個) 追加します。抜き取られたメッシュで、本物の Viseme・表情の BlendShape が意味不明なダミーに紛れて分かりにくくなります。\n" +
+                 "本物の名前・順序・index は完全に保存するため、アニメーションや各種ツールの参照は一切壊れません。\n" +
+                 "副作用: メッシュのファイルサイズが少し増えます。")]
         [SerializeField] private bool enableBlendShapeDecoy = false;
 
         [Tooltip("Decoy として追加する dummy BlendShape の最低個数。 ビルドごとにこの値〜MaxCount の間でランダム決定される。")]
@@ -438,14 +397,9 @@ namespace AjisaiFlow.AntiRipping
 
         // ────────────────────────────── Decoy Animator (v0.28) ──────────────────────────────
 
-        [Tooltip("v0.28+: 攻撃者撹乱用に「ダミー SMR + ダミー BlendShape + ダミー Material + ダミー AnimationClip\n" +
-                 " + ダミー AnimatorController (依存チェーン Layer 構成)」を avatar root 直下に注入する。\n" +
-                 "新規 Decoy controller は MA MergeAnimator で本物 FX に統合され、 Optimizing phase で\n" +
-                 "Layer / State / Parameter / Asset 名がすべて _<16hex> 化されるため、 本物の解錠 chain\n" +
-                 "(K0..K7 → Score → Broadcast → Display) とダミーが視覚的に区別不能になる。\n" +
-                 "ダミー parameter は全て localOnly=true なので VRChat synced parameter budget (256bit) を消費しない。\n" +
-                 "ダミー BlendShape は Animator から実際に駆動 (constant 0 curve) されるため AAO TraceAndOptimize で削除されない。\n" +
-                 "副作用: Hierarchy / Animator / Asset 一覧に大量の _<16hex> が並ぶため debug 性能が下がる。")]
+        [Tooltip("解析を惑わすため、ダミーの SkinnedMeshRenderer・マテリアル・アニメーターをアバターに追加します。本物の解錠処理とダミーが見分けにくくなります。\n" +
+                 "ダミーは同期パラメーターを消費しません。\n" +
+                 "副作用: Hierarchy やアセット一覧にダミーが多数並び、Performance Rank に影響する場合があります。")]
         [SerializeField] private bool enableDecoyAnimator = false;
 
         [Tooltip("ダミー SMR の最低個数。 ビルドごとに この値〜MaxCount の間でランダム決定される。")]
@@ -474,22 +428,13 @@ namespace AjisaiFlow.AntiRipping
 
         // ────────────────────────────── Hierarchy Shuffle (v0.29) ──────────────────────────────
 
-        [Tooltip("v0.29+: avatar 配下の各 Transform の子順序 (sibling index) を Fisher-Yates でランダム並び替えする。\n" +
-                 "AssetRipper 抽出時に「上から Body / Hair / Outfit / 装飾」のような直感的順序が消え、\n" +
-                 "攻撃者が hierarchy 構造から avatar の組成を推測する手間が増える。\n" +
-                 "sibling 順序は AnimationClip path / Mecanim Humanoid / SMR.bones[] には影響しない\n" +
-                 "(Animator / 物理 / 表情 は無傷)。\n" +
-                 "注意: MA Menu Item / Menu Group は sibling 順でメニュー項目順が決まるため、 シャッフルすると\n" +
-                 "メニューの並びが乱れる。 下の preserveMaMenuOrder (default ON) で防止できる。\n" +
-                 "副作用: Inspector / Hierarchy で順序が毎ビルドごとに変わるため debug 性能↓。")]
+        [Tooltip("アバター配下のオブジェクトの並び順をランダムに入れ替えます。抜き取り時に、直感的な構造から組成を推測しにくくします。\n" +
+                 "腕・脚のボーンや PhysBone など並び順に依存する部分は並び替えません。VRCFury を使っているアバターでは並び替えません。\n" +
+                 "注意: Modular Avatar のメニュー順は並び替えで乱れることがあります。下の設定 (既定 ON) で防げます。")]
         [SerializeField] private bool enableHierarchyShuffle = false;
 
-        [Tooltip("v0.42+: Hierarchy Shuffle ON 時に、 MA Menu Item / Menu Group を子に持つ親の子順序を\n" +
-                 "シャッフルから除外し、 メニュー項目の並び順を保持する。\n" +
-                 "MA はヒエラルキー上の sibling 順でメニュー項目の表示順を決めるため、 シャッフルすると\n" +
-                 "メニューがちゃがちゃになる。 ON でメニュー関連ノードのみ順序を保持し、 それ以外は通常通りシャッフルする。\n" +
-                 "default ON (= メニューを壊さない)。 OFF にすると従来挙動 (= メニューもシャッフル対象)。\n" +
-                 "(Modular Avatar 未導入時はこの設定に関わらずメニュー処理自体が無いため無影響。)")]
+        [Tooltip("Hierarchy 並び替えが ON のとき、Modular Avatar のメニュー項目を持つ親の並び替えを除外し、メニューの順序を保ちます。\n" +
+                 "MA はオブジェクトの並び順でメニュー項目順を決めるため、除外しないとメニューが乱れます。既定 ON。")]
         [SerializeField] private bool preserveMaMenuOrder = true;
 
         // ────────────────────────────── 対象別絞り込み (v0.42) ──────────────────────────────
@@ -497,11 +442,9 @@ namespace AjisaiFlow.AntiRipping
         // 既存の excludeFromShaderLock / excludeFromTextureEncryption / MmdBlendShapeWhitelist と
         // 同じ「全対象にかけて個別に外す」設計に揃える。
 
-        [Tooltip("v0.42+: 難読化 (GameObject 名難読化) の影響を受けない GameObject を指定する。\n" +
-                 "指定された GO は元の名前のまま維持され rename されない (= AssetRipper で意味のある名前が残るため\n" +
-                 "当該 GO の識別防止効果は下がるが、 外部ツール / 他ワールドが GO 名やパスに依存する場合の互換性を確保できる)。\n" +
-                 "用途: 名前依存の外部連携 GO、 OSC で path 参照される GO、 デバッグで追跡したい GO 等。\n" +
-                 "enableGameObjectObfuscation が ON のときのみ意味を持つ。 参照は元 prefab/scene の GameObject。")]
+        [Tooltip("GameObject 名の難読化から除外する GameObject を指定します。指定した GameObject は元の名前のまま維持されます。\n" +
+                 "用途: 名前やパスで参照される外部連携・OSC・デバッグ対象など。\n" +
+                 "GameObject 名難読化が ON のときのみ効果があります。")]
         [SerializeField] private GameObject[] obfuscationExcludeGameObjects = new GameObject[0];
 
         [Tooltip("v0.42+: ON のとき、 上で指定した GameObject の子孫 (子・孫…) も全て GO 名難読化から除外する。\n" +
@@ -509,33 +452,21 @@ namespace AjisaiFlow.AntiRipping
                  "default ON (= 衣装ルートを 1 つ指定すれば配下メッシュ全部を除外、という最頻ユースケースに合わせる)。")]
         [SerializeField] private bool obfuscationExcludeIncludeChildren = true;
 
-        [Tooltip("v0.42+: BlendShape 難読化 ON 時に、 フェイストラッキング (VRCFaceTracking / ARKit / SRanipal /\n" +
-                 "Unified Expressions) の標準 BlendShape 名 (jawOpen / eyeBlinkLeft / Jaw_Open / JawOpen 等) を\n" +
-                 "rename 対象から除外する (= 順序シャッフルには参加するが名前は元のまま維持)。\n" +
-                 "FT は外部 OSC アプリ / 別ワールドが BlendShape 名を前提に駆動するため、 rename されると連携が切れる。\n" +
-                 "照合は case-insensitive 完全一致 (ARKit camelCase / SRanipal underscore / Unified PascalCase の\n" +
-                 "綴り揺れを吸収)。 default ON (MMD/VRCOSC 除外と同じ互換性優先方針)。")]
+        [Tooltip("BlendShape 難読化が ON のとき、フェイストラッキング (VRCFaceTracking / ARKit 等) の標準 BlendShape 名を名前の置き換えから除外します (順序シャッフルには参加します)。\n" +
+                 "フェイストラッキングは BlendShape 名で駆動するため、除外しないと連携が切れます。既定 ON。")]
         [SerializeField] private bool excludeFaceTrackingBlendShapes = true;
 
-        [Tooltip("v0.42+: BlendShape 難読化から手動で除外する BlendShape 名 (case-insensitive 完全一致)。\n" +
-                 "FT プリセット (excludeFaceTrackingBlendShapes) で拾えない作者独自命名の BlendShape を救済する。\n" +
-                 "例: 独自の表情ギミック BlendShape を外部 OSC で名前駆動する場合等。\n" +
-                 "指定された BlendShape は rename されず元の名前のまま残る (= 当該 BS の識別防止効果は下がる)。")]
+        [Tooltip("BlendShape 難読化から手動で除外する BlendShape 名 (大文字小文字を区別しない完全一致)。\n" +
+                 "フェイストラッキングのプリセットで拾えない、作者独自の名前を救済したいときに使います。指定した BlendShape は元の名前のまま残ります。")]
         [SerializeField] private string[] extraBlendShapesToExclude = new string[0];
 
-        [Tooltip("フェイストラッキング用パラメータ (v2/ prefix 等) をパラメータ名難読化から除外する。\n" +
-                 "VRCFaceTracking 等の外部アプリは名前で OSC 送信するため、 rename すると顔トラッキングが機能停止する。\n" +
-                 "対象: 'v2/' で始まる、 または '/v2/' を含む (組織 prefix 形 'X/v2/...') パラメータ、\n" +
-                 "および legacy 3 名 (EyeTrackingActive / LipTrackingActive / ExpressionTrackingActive)。\n" +
-                 "default ON (excludeFaceTrackingBlendShapes と対になる互換性優先方針)。")]
+        [Tooltip("フェイストラッキング用のパラメーター (名前が「v2/」で始まる等) をパラメーター難読化から除外します。\n" +
+                 "VRCFaceTracking 等は名前で OSC 送信するため、除外しないと顔トラッキングが機能停止します。既定 ON。")]
         [SerializeField] private bool excludeFaceTrackingParameters = true;
 
-        [Tooltip("v0.42+: Animator パラメータ難読化から手動で除外するパラメータ名。\n" +
-                 "なでなで等の接触ギミックは VRC Contact Receiver の parameter を自動追従 rewrite して保護されるが、\n" +
-                 "非標準コンポーネント / OSC 駆動 contact / SDK 版差で自動追従が取りこぼした場合の救済用。\n" +
-                 "照合: 完全一致 (case-sensitive。 VRChat parameter は case-sensitive)。\n" +
-                 "末尾が '/' のエントリは prefix 一致 (例: 'MyGimmick/' は 'MyGimmick/Foo' 等に前方一致)。\n" +
-                 "指定されたパラメータは rename されず元の名前のまま残る。")]
+        [Tooltip("パラメーター難読化から手動で除外するパラメーター名。\n" +
+                 "なでなで等の接触ギミックは自動で保護されますが、自動で拾えなかった場合の救済用です。\n" +
+                 "完全一致のほか、末尾を「/」にすると前方一致になります (例: 'MyGimmick/')。指定したパラメーターは元の名前のまま残ります。")]
         [SerializeField] private string[] excludeParameterNamesFromObfuscation = new string[0];
 
         // ────────────────────────────── 詳細 ──────────────────────────────
@@ -552,12 +483,9 @@ namespace AjisaiFlow.AntiRipping
         // trade-off: locked shader file が disk に残るため attacker が shader 構造を解析可能になる
         // (ただし texture 復号には _AR_TK0..3 = Animator AAP score が必要で、 shader 抽出だけでは
         // texture 復号は不可)。 解析耐性を最大化したい配布時は OFF にできる (任意)。
-        [Tooltip("生成シェーダーをビルド間で保持してビルド時間を短縮 (default ON)\n" +
-                 "効果: Unity ShaderCache が hit し shader compile が大幅短縮 (= 多 material avatar で数十分→数分)。\n" +
-                 "trade-off: locked shader file が Generated/Shaders/_AR_*.shader として disk に残り、\n" +
-                 "解析者が shader 構造を読める。 ただし texture 復号には Animator AAP score 累積が必要なため、\n" +
-                 "shader 単体抽出では texture は復号できない (= protection が完全に失われるわけではない)。\n" +
-                 "default ON。 解析耐性を最大化したい配布時のみ OFF にできる (任意)。")]
+        [Tooltip("生成したシェーダーをビルド間で保持し、2 回目以降のビルドを高速化します (既定 ON、多マテリアルのアバターで数十分→数分)。\n" +
+                 "ただし保護シェーダーがプロジェクト内に残るため、解析者にシェーダー構造を見られる可能性があります (テクスチャの復号には解錠が別途必要なため、シェーダーだけでは復号できません)。\n" +
+                 "解析耐性を最大化したい配布時のみ OFF にできます。")]
         [SerializeField] private bool keepGeneratedShadersBetweenBuilds = true;
 
         // ────────────────────────────── プロパティ ──────────────────────────────
@@ -642,11 +570,14 @@ namespace AjisaiFlow.AntiRipping
         // EnableTexturePixelEncryption が ON でない時は意味がない (= 暗号化 texture 参照自体が無い) ので AND ゲート。
         public bool StripUnencryptedTextureRefs => EnableTexturePixelEncryption && stripUnencryptedTextureRefs;
         public bool AcknowledgeVRCFuryLeak => acknowledgeVRCFuryLeak;
-        public int TextureEncryptionMaxResolution => Mathf.Clamp(textureEncryptionMaxResolution, 256, 8192);
+        public int TextureEncryptionMaxResolution => SnapTextureResolution(textureEncryptionMaxResolution);
 
-        // v0.34.7: Fallback placeholder
-        public bool ShowFallbackPlaceholder => showFallbackPlaceholder;
-        public int FallbackPlaceholderResolution => Mathf.Clamp(fallbackPlaceholderResolution, 16, 256);
+        /// <summary>画像ごとの暗号化設定を返す。未設定時は空配列を返す。</summary>
+        public TextureOverride[] TextureOverrides => textureOverrides ?? new TextureOverride[0];
+
+        // v0.34.7: Fallback placeholder は常に有効 (旧 serialized 値は互換性のため保持)。
+        public bool ShowFallbackPlaceholder => true;
+        public int FallbackPlaceholderResolution => SnapPlaceholderResolution(fallbackPlaceholderResolution);
         public bool EnableGameObjectObfuscation => enableGameObjectObfuscation;
         public bool EnableBlendShapeObfuscation => enableBlendShapeObfuscation;
 
@@ -916,6 +847,26 @@ namespace AjisaiFlow.AntiRipping
             for (int i = 0; i < excludeFromTextureEncryption.Length; i++)
             {
                 if (excludeFromTextureEncryption[i] == srcMat) return true;
+            }
+            return false;
+        }
+
+        public Texture2D[] ExcludeTexturesFromEncryption => excludeTexturesFromEncryption ?? new Texture2D[0];
+
+        /// <summary>
+        /// v0.51: src texture が ExcludeTexturesFromEncryption list に含まれているか判定 (テクスチャ単位除外)。
+        /// 含まれていれば texture pixel encryption を skip する (= 平文で AssetBundle に焼かれ leak 許容、 shader-lock /
+        /// mesh 保護は不変)。 元 (src) texture asset の reference 比較で、 prefab material に貼られている original texture
+        /// のみマッチする (= clone / 暗号化済 variant は別 reference)。 引数は Texture 型で受け、 material.GetTexture の
+        /// 戻り値をそのまま渡せるようにする (実体が Texture2D 以外でも reference 比較で自然に false になる)。
+        /// </summary>
+        public bool IsTextureExcludedFromEncryption(Texture tex)
+        {
+            if (tex == null || excludeTexturesFromEncryption == null || excludeTexturesFromEncryption.Length == 0)
+                return false;
+            for (int i = 0; i < excludeTexturesFromEncryption.Length; i++)
+            {
+                if (excludeTexturesFromEncryption[i] == tex) return true;
             }
             return false;
         }

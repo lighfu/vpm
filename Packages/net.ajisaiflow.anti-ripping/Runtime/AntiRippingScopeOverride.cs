@@ -25,7 +25,7 @@ namespace AjisaiFlow.AntiRipping
     ///
     /// 注意 (共有リソース): texture/material と mesh は複数 GO で共有され得る。 共有 material/mesh を
     /// 1 つの GO で除外すると、 同じ material/mesh を使う他 GO でも難読化されない (除外が広く波及する)。
-    /// Hierarchy 並び替えは sibling 順序が副作用ゼロのため、 この共有問題は発生しない。
+    /// Hierarchy 並び替えは共有リソース (material / mesh) を持たないため、 この共有問題は発生しない。
     /// </summary>
     [AddComponentMenu("紫陽花広場/VRChat Anti-Ripping Scope Override (per-GameObject)")]
     [DisallowMultipleComponent]
@@ -106,12 +106,18 @@ namespace AjisaiFlow.AntiRipping
         /// 共有 mesh はいずれかの GO で除外されると全体が除外される (mesh 単位)。
         /// </summary>
         public static HashSet<Mesh> CollectBlendShapeExcludedMeshes(GameObject avatar)
+            => CollectMeshExcludedMeshes(avatar, false);
+
+        /// <summary>BlendShape / Mesh Lock の共通条件で除外対象 Mesh を集める。</summary>
+        private static HashSet<Mesh> CollectMeshExcludedMeshes(GameObject avatar, bool meshLock)
         {
             var set = new HashSet<Mesh>();
             if (avatar == null) return set;
             foreach (var ov in avatar.GetComponentsInChildren<AntiRippingScopeOverride>(true))
             {
-                if (ov == null || !ov.excludeBlendShapeObfuscation) continue;
+                if (ov == null || (meshLock
+                        ? !ov.excludeMeshLockVertexScramble
+                        : !ov.excludeBlendShapeObfuscation)) continue;
                 var smrs = ov.includeChildren
                     ? ov.GetComponentsInChildren<SkinnedMeshRenderer>(true)
                     : ov.GetComponents<SkinnedMeshRenderer>();
@@ -132,22 +138,7 @@ namespace AjisaiFlow.AntiRipping
         /// 共有 mesh はいずれかの GO で除外されると全体が除外される (mesh 単位、 BlendShape 難読化除外と同一意味論)。
         /// </summary>
         public static HashSet<Mesh> CollectMeshLockExcludedMeshes(GameObject avatar)
-        {
-            var set = new HashSet<Mesh>();
-            if (avatar == null) return set;
-            foreach (var ov in avatar.GetComponentsInChildren<AntiRippingScopeOverride>(true))
-            {
-                if (ov == null || !ov.excludeMeshLockVertexScramble) continue;
-                var smrs = ov.includeChildren
-                    ? ov.GetComponentsInChildren<SkinnedMeshRenderer>(true)
-                    : ov.GetComponents<SkinnedMeshRenderer>();
-                for (int i = 0; i < smrs.Length; i++)
-                {
-                    if (smrs[i] != null && smrs[i].sharedMesh != null) set.Add(smrs[i].sharedMesh);
-                }
-            }
-            return set;
-        }
+            => CollectMeshExcludedMeshes(avatar, true);
 
         /// <summary>
         /// テクスチャ暗号化から除外する Material 集合を集める (元 prefab/scene の sharedMaterials reference)。
