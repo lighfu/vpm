@@ -70,6 +70,9 @@ jobs:
             ~/.nuget/packages
           key: ${{ runner.os }}-${{ hashFiles('**/global.json', '**/*.csproj') }}
 
+      - name: Patch empty release discovery
+        run: python3 -B .github/scripts/patch-listing-builder.py "${{env.pathToCi}}/PackageBuilder/Build.cs"
+
       - name: Build Stable Listing
         run: ${{env.pathToCi}}/build.cmd BuildMultiPackageListing --root ${{env.pathToCi}} --list-publish-directory $GITHUB_WORKSPACE/${{env.listPublishDirectory}}
         env:
