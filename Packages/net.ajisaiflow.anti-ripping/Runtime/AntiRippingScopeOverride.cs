@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using nadena.dev.ndmf;
 using UnityEngine;
@@ -31,36 +32,36 @@ namespace AjisaiFlow.AntiRipping
     [DisallowMultipleComponent]
     public sealed class AntiRippingScopeOverride : MonoBehaviour, INDMFEditorOnly
     {
-        [Tooltip("ON のとき、 この GameObject の子順序を Hierarchy 並び替え (撹乱) から除外し、 並びを保持する。\n" +
-                 "メニュー以外でも『この衣装の中身の並びを固定したい』等に使う。")]
+        [Tooltip("ONにすると、このGameObjectの子オブジェクトをHierarchyの並び替えから除外し、元の順序を保ちます。\n" +
+                 "メニュー項目や衣装内のオブジェクトなど、並び順を固定したい場合に使います。")]
         [SerializeField] private bool excludeHierarchyShuffle = false;
 
-        [Tooltip("ON のとき、 この GameObject の SkinnedMeshRenderer の sharedMesh の BlendShape を\n" +
-                 "難読化 (rename) から除外する。 名前で BlendShape を駆動する外部連携を維持したいメッシュに使う。\n" +
-                 "注意: 同じ mesh を他 GO も使っている場合、 その mesh 全体が除外される (共有)。")]
+        [Tooltip("ONにすると、このGameObjectのSkinnedMeshRendererが参照するメッシュのBlendShapeを\n" +
+                 "名前の難読化から除外します。BlendShape名を指定して動かす外部ツールと連携する場合に使います。\n" +
+                 "同じメッシュを他のGameObjectも使っている場合、そのメッシュ全体が除外されます。")]
         [SerializeField] private bool excludeBlendShapeObfuscation = false;
 
-        [Tooltip("ON のとき、 この GameObject の SkinnedMeshRenderer を Mesh Lock (頂点スクランブル + Unlock BlendShape) から除外する。\n" +
-                 "SPS plug など、 シェーダーで rest-pose 頂点を変形させる mesh は、 頂点配列を collapse されると変形が散乱して破綻する。\n" +
-                 "除外すると元 mesh のまま保たれ SPS 等が正常動作する。\n" +
-                 "注意: 除外した mesh は Mesh Lock で保護されない (リッピング耐性が下がる)。 同じ mesh を他 GO も使っている場合、 その mesh 全体が除外される (共有)。")]
+        [Tooltip("ONにすると、このGameObjectのSkinnedMeshRenderer / MeshRendererをメッシュロックの頂点散らしと試験対応のメッシュ暗号化から除外します。\n" +
+                 "SPS plugなど、シェーダーで初期状態の頂点を変形させるメッシュは、メッシュロックで頂点を散らすと正常に変形しなくなります。\n" +
+                 "除外すると元のメッシュを保つため、SPS等が正常に動作します。\n" +
+                 "除外したメッシュはメッシュロックで保護されず、抜き取りへの耐性が下がります。同じメッシュを他のGameObjectも使っている場合、そのメッシュ全体が除外されます。")]
         [SerializeField] private bool excludeMeshLockVertexScramble = false;
 
-        [Tooltip("ON のとき、 この GameObject の Renderer が参照する material の texture を\n" +
-                 "テクスチャ暗号化から除外する (= 元 texture が AssetBundle に残り抽出可能になる)。\n" +
-                 "注意: 同じ material を他 GO も使っている場合、 その material 全体が除外される (共有)。")]
+        [Tooltip("ONにすると、このGameObjectのRendererが参照するマテリアルのテクスチャを\n" +
+                 "暗号化から除外します。元の画像がAssetBundleに残り、抜き取れる状態になります。\n" +
+                 "同じマテリアルを他のGameObjectも使っている場合、そのマテリアル全体が除外されます。")]
         [SerializeField] private bool excludeTextureEncryption = false;
 
-        [Tooltip("ON のとき、 この GameObject の Renderer (SkinnedMeshRenderer / MeshRenderer) をシェーダーロック\n" +
-                 "(material を locked variant に差し替える保護) から除外する。 material は元 shader のまま維持され、\n" +
-                 "この Renderer の material にはテクスチャ暗号化も適用されない。\n" +
-                 "SPS plug など、 ビルド時に material の shader を改変 (patch) する外部ツールと併用する Renderer に使う。\n" +
-                 "注意: 除外した Renderer の material / texture はリッピング保護されない。 material を他 GO と共有している場合、\n" +
-                 "共有先の texture も平文で同梱される (共有先の暗号化が実効性を失う)。")]
+        [Tooltip("ONにすると、このGameObjectのRenderer (SkinnedMeshRenderer / MeshRenderer) を、保護版シェーダーへの差し替えから除外します。\n" +
+                 "マテリアルは元のシェーダーを使い続け、\n" +
+                 "このRendererのマテリアルにはテクスチャ暗号化も適用しません。\n" +
+                 "SPS plugなど、ビルド時にシェーダーを書き換える外部ツールと併用する場合に使います。\n" +
+                 "除外したRendererのマテリアル・テクスチャは保護されません。他のGameObjectとマテリアルを共有している場合、\n" +
+                 "共有先のテクスチャも暗号化せずに同梱されるため、共有先で暗号化しても保護できません。")]
         [SerializeField] private bool excludeShaderLockSwap = false;
 
-        [Tooltip("ON (既定) のとき、 上記の除外をこの GameObject の子孫にも適用する。\n" +
-                 "OFF のときはこの GameObject 自身のみが対象。")]
+        [Tooltip("ONにすると、上記の除外をこのGameObjectの子・孫などにも適用します。初期設定はONです。\n" +
+                 "OFFの場合は、このGameObject自身だけが対象です。")]
         [SerializeField] private bool includeChildren = true;
 
         public bool ExcludeHierarchyShuffle => excludeHierarchyShuffle;
@@ -84,17 +85,38 @@ namespace AjisaiFlow.AntiRipping
         /// HierarchyShufflePass はこの集合に含まれる親の子順序をシャッフルしない。
         /// </summary>
         public static HashSet<Transform> CollectShuffleExcludedTransforms(GameObject avatar)
+            => CollectExcluded<Transform, Transform>(avatar, ov => ov.excludeHierarchyShuffle, t => new[] { t });
+
+        /// <summary>
+        /// 4 つの Collect* (Shuffle/Mesh/Texture/ShaderLock) に共通する形を集約したヘルパー。
+        /// 「excludeXxx が ON の override を走査 → IncludeChildren に応じて対象 Component を集める
+        /// (ON なら GetComponentsInChildren、OFF なら自 GO の GetComponents のみ) → selector で
+        /// 除外対象の値へ変換して集合化」という手順は 4 メソッドで同一。 isExcluded / selector だけが異なる。
+        /// </summary>
+        private static HashSet<TResult> CollectExcluded<TComponent, TResult>(
+            GameObject avatar,
+            Func<AntiRippingScopeOverride, bool> isExcluded,
+            Func<TComponent, TResult[]> selector)
+            where TComponent : Component
+            where TResult : UnityEngine.Object
         {
-            var set = new HashSet<Transform>();
+            var set = new HashSet<TResult>();
             if (avatar == null) return set;
             foreach (var ov in avatar.GetComponentsInChildren<AntiRippingScopeOverride>(true))
             {
-                if (ov == null || !ov.excludeHierarchyShuffle) continue;
-                set.Add(ov.transform);
-                if (ov.includeChildren)
+                if (ov == null || !isExcluded(ov)) continue;
+                var components = ov.includeChildren
+                    ? ov.GetComponentsInChildren<TComponent>(true)
+                    : ov.GetComponents<TComponent>();
+                for (int i = 0; i < components.Length; i++)
                 {
-                    var children = ov.GetComponentsInChildren<Transform>(true);
-                    for (int i = 0; i < children.Length; i++) set.Add(children[i]);
+                    if (components[i] == null) continue;
+                    var results = selector(components[i]);
+                    if (results == null) continue;
+                    for (int j = 0; j < results.Length; j++)
+                    {
+                        if (results[j] != null) set.Add(results[j]);
+                    }
                 }
             }
             return set;
@@ -110,35 +132,29 @@ namespace AjisaiFlow.AntiRipping
 
         /// <summary>BlendShape / Mesh Lock の共通条件で除外対象 Mesh を集める。</summary>
         private static HashSet<Mesh> CollectMeshExcludedMeshes(GameObject avatar, bool meshLock)
-        {
-            var set = new HashSet<Mesh>();
-            if (avatar == null) return set;
-            foreach (var ov in avatar.GetComponentsInChildren<AntiRippingScopeOverride>(true))
-            {
-                if (ov == null || (meshLock
-                        ? !ov.excludeMeshLockVertexScramble
-                        : !ov.excludeBlendShapeObfuscation)) continue;
-                var smrs = ov.includeChildren
-                    ? ov.GetComponentsInChildren<SkinnedMeshRenderer>(true)
-                    : ov.GetComponents<SkinnedMeshRenderer>();
-                for (int i = 0; i < smrs.Length; i++)
-                {
-                    if (smrs[i] != null && smrs[i].sharedMesh != null) set.Add(smrs[i].sharedMesh);
-                }
-            }
-            return set;
-        }
+            => CollectExcluded<SkinnedMeshRenderer, Mesh>(avatar,
+                ov => meshLock ? ov.excludeMeshLockVertexScramble : ov.excludeBlendShapeObfuscation,
+                smr => smr.sharedMesh != null ? new[] { smr.sharedMesh } : Array.Empty<Mesh>());
 
         /// <summary>
         /// Mesh Lock (頂点スクランブル + Unlock BlendShape) から除外する Mesh 集合を集める。
-        /// excludeMeshLockVertexScramble が ON の GO (+ IncludeChildren なら子孫) の SkinnedMeshRenderer の sharedMesh。
+        /// excludeMeshLockVertexScramble が ON の GO (+ IncludeChildren なら子孫) の SMR / MR の sharedMesh。
         /// MeshLockPass はこの集合に含まれる sharedMesh を持つ SMR を完全に skip する (頂点 collapse / Unlock BlendShape 追加 /
         /// 描画停止 (m_Enabled=0) / 解錠対象登録 のいずれも行わない)。 SPS plug 等、 シェーダーで rest-pose 頂点を変形する
         /// mesh は頂点配列を置換されると変形が破綻するため、 これで元 mesh を保持して保護対象外にする。
         /// 共有 mesh はいずれかの GO で除外されると全体が除外される (mesh 単位、 BlendShape 難読化除外と同一意味論)。
         /// </summary>
         public static HashSet<Mesh> CollectMeshLockExcludedMeshes(GameObject avatar)
-            => CollectMeshExcludedMeshes(avatar, true);
+        {
+            var meshes = CollectMeshExcludedMeshes(avatar, true);
+            meshes.UnionWith(CollectExcluded<MeshRenderer, Mesh>(avatar, ov => ov.excludeMeshLockVertexScramble,
+                renderer =>
+                {
+                    var filter = renderer.GetComponent<MeshFilter>();
+                    return filter != null && filter.sharedMesh != null ? new[] { filter.sharedMesh } : Array.Empty<Mesh>();
+                }));
+            return meshes;
+        }
 
         /// <summary>
         /// テクスチャ暗号化から除外する Material 集合を集める (元 prefab/scene の sharedMaterials reference)。
@@ -147,27 +163,8 @@ namespace AjisaiFlow.AntiRipping
         /// 共有 material はいずれかの GO で除外されると全体が除外される (material 単位)。
         /// </summary>
         public static HashSet<Material> CollectTextureExcludedMaterials(GameObject avatar)
-        {
-            var set = new HashSet<Material>();
-            if (avatar == null) return set;
-            foreach (var ov in avatar.GetComponentsInChildren<AntiRippingScopeOverride>(true))
-            {
-                if (ov == null || !ov.excludeTextureEncryption) continue;
-                var renderers = ov.includeChildren
-                    ? ov.GetComponentsInChildren<Renderer>(true)
-                    : ov.GetComponents<Renderer>();
-                for (int i = 0; i < renderers.Length; i++)
-                {
-                    var mats = renderers[i] != null ? renderers[i].sharedMaterials : null;
-                    if (mats == null) continue;
-                    for (int m = 0; m < mats.Length; m++)
-                    {
-                        if (mats[m] != null) set.Add(mats[m]);
-                    }
-                }
-            }
-            return set;
-        }
+            => CollectExcluded<Renderer, Material>(avatar, ov => ov.excludeTextureEncryption,
+                r => r.sharedMaterials ?? Array.Empty<Material>());
 
         /// <summary>
         /// シェーダーロック (material の locked variant swap) + テクスチャ暗号化から除外する Renderer 集合を集める。
@@ -178,21 +175,6 @@ namespace AjisaiFlow.AntiRipping
         /// 共有を検出した場合はビルドログに Warn が出る。
         /// </summary>
         public static HashSet<Renderer> CollectShaderLockExcludedRenderers(GameObject avatar)
-        {
-            var set = new HashSet<Renderer>();
-            if (avatar == null) return set;
-            foreach (var ov in avatar.GetComponentsInChildren<AntiRippingScopeOverride>(true))
-            {
-                if (ov == null || !ov.excludeShaderLockSwap) continue;
-                var renderers = ov.includeChildren
-                    ? ov.GetComponentsInChildren<Renderer>(true)
-                    : ov.GetComponents<Renderer>();
-                for (int i = 0; i < renderers.Length; i++)
-                {
-                    if (renderers[i] != null) set.Add(renderers[i]);
-                }
-            }
-            return set;
-        }
+            => CollectExcluded<Renderer, Renderer>(avatar, ov => ov.excludeShaderLockSwap, r => new[] { r });
     }
 }

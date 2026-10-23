@@ -1,0 +1,21 @@
+{
+    "name": "AjisaiFlow.AntiRipping.AvatarOptimizer",
+    "rootNamespace": "AjisaiFlow.AntiRipping.Editor.Pipeline",
+    "references": [
+        "AjisaiFlow.AntiRipping.Runtime",
+        "com.anatawa12.avatar-optimizer.api.editor"
+    ],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": ["AAO_VAO_AVAILABLE"],
+    "versionDefines": [{
+        "name": "com.anatawa12.avatar-optimizer",
+        "expression": "1.6.0",
+        "define": "AAO_VAO_AVAILABLE"
+    }],
+    "noEngineReferences": false
+}
