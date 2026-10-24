@@ -14,6 +14,9 @@ namespace AjisaiFlow.AntiRipping
     public sealed class MeshEncryptionPlan : MonoBehaviour, INDMFEditorOnly
     {
         [HideInInspector] public SkinnedMeshRenderer[] Targets = Array.Empty<SkinnedMeshRenderer>();
+        // Keep each prepared source owner's reference remappable through optimizer merges.
+        // Source mesh identities remain in build state and are never serialized here.
+        [HideInInspector] public SkinnedMeshRenderer[] SourceOwners = Array.Empty<SkinnedMeshRenderer>();
         [HideInInspector] public SkinnedMeshRenderer[] ExcludedTargets = Array.Empty<SkinnedMeshRenderer>();
         [HideInInspector] public MeshRenderer[] ExcludedMeshRenderers = Array.Empty<MeshRenderer>();
     }

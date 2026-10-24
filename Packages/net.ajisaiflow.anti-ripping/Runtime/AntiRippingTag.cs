@@ -518,6 +518,25 @@ namespace AjisaiFlow.AntiRipping
 
         // ────────────────────────────── 詳細 ──────────────────────────────
 
+        // Anti-Ripping の検査でアップロードを停止する条件。Unity / SDK 自体のエラーは制御しない。
+        [Tooltip("アニメーションによるメッシュ／マテリアルの差し替えを検出したときに停止します。OFF の場合は対象のレンダラーをメッシュ暗号化から除外し、警告を表示して続行します。")]
+        [SerializeField] private bool stopOnAnimatedReplacement = false;
+
+        [Tooltip("メッシュ暗号化やキー配送の最終チェックに失敗したときに停止します。OFF の場合は警告を表示して続行します。")]
+        [SerializeField] private bool stopOnMeshValidationFailure = true;
+
+        [Tooltip("同期パラメーターの上限を超えたときに停止します。OFF の場合は警告を表示して続行します。")]
+        [SerializeField] private bool stopOnParameterBudgetExceeded = true;
+
+        [Tooltip("テクスチャ容量の判定で上限を超えたときに停止します。OFF の場合は警告を表示して続行します。")]
+        [SerializeField] private bool stopOnTextureBudgetExceeded = true;
+
+        [Tooltip("解錠データの保存・配送、またはクライアントのインストール・更新確認に失敗したときに停止します。OFF の場合は警告を表示して続行します。")]
+        [SerializeField] private bool stopOnUnlockDataExportFailure = true;
+
+        [Tooltip("メッシュ暗号化シェーダーのコンパイル検査に失敗したときに停止します。Unity や SDK 自体のエラーによる停止は別です。")]
+        [SerializeField] private bool stopOnShaderCompilationFailure = true;
+
         [Tooltip("ビルド時にConsoleへ詳細ログを出すか")]
         [SerializeField] private bool verboseLogging = false;
 
@@ -545,6 +564,13 @@ namespace AjisaiFlow.AntiRipping
         public bool EnableHierarchyWatermark => enableHierarchyWatermark;
         public bool EnableBuildFingerprint => enableBuildFingerprint;
         public bool ShowBuildReportInNdmf => showBuildReportInNdmf;
+
+        public bool StopOnAnimatedReplacement => stopOnAnimatedReplacement;
+        public bool StopOnMeshValidationFailure => stopOnMeshValidationFailure;
+        public bool StopOnParameterBudgetExceeded => stopOnParameterBudgetExceeded;
+        public bool StopOnTextureBudgetExceeded => stopOnTextureBudgetExceeded;
+        public bool StopOnUnlockDataExportFailure => stopOnUnlockDataExportFailure;
+        public bool StopOnShaderCompilationFailure => stopOnShaderCompilationFailure;
 
         public bool EnableMeshLock => enableMeshLock;
         public bool MeshKeyEncryption => enableMeshLock && meshKeyEncryption;

@@ -16,6 +16,7 @@ namespace AjisaiFlow.AntiRipping.Editor.Pipeline
             // A root dependency also retains the plan if a preceding tool temporarily disables it.
             collector.AddDependency(component.transform.root, component);
             AddTargets(component.Targets, collector);
+            AddTargets(component.SourceOwners, collector);
             AddTargets(component.ExcludedTargets, collector);
             AddTargets(component.ExcludedMeshRenderers, collector);
         }
