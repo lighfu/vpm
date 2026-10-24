@@ -1,7 +1,7 @@
 {
   "name": "net.ajisaiflow.anti-ripping",
   "displayName": "Anti-Ripping",
-  "version": "0.53.1",
+  "version": "0.53.2",
   "unity": "2022.3",
   "description": "VRChatアバターのリッピング対策ツール。NDMFでメッシュとテクスチャの暗号化、ダミーBlendShapeの追加、各種難読化を行います。",
   "author": {
