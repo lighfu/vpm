@@ -143,15 +143,12 @@ namespace AjisaiFlow.AntiRipping
         [Tooltip("PC向けのメッシュ暗号化を使用します。座標・法線・接線・表情差分を64bit鍵で暗号化します。\n" +
                  "対応シェーダーと更新された解錠アプリが必要です。非対応の構成はビルド時に停止します。\n" +
                  "テクスチャ暗号化のON/OFFにかかわらず同期予算は16bitです。自分は鍵が届くと復号しますが、他の人には全鍵の分割同期が完了してから表示されます。\n" +
-                 "鍵と検査値を詰めて送り、共通鍵の通常再送はテクスチャ併用でも一巡約9秒です。独立したテクスチャ鍵を使う互換設定では約11秒です。初回は0.1秒間隔でも先行送信します。検査時間や通信・読み込み時間が加わり、表示までの時間や上限は保証しません。")]
+                 "鍵と検査値を詰めて送り、テクスチャ暗号化と併用すると同じ64bit鍵を使い、通常再送は一巡約9秒です。初回は0.1秒間隔でも先行送信します。検査時間や通信・読み込み時間が加わり、表示までの時間や上限は保証しません。")]
         [SerializeField] private bool meshKeyEncryption = true;
 
         // The independent legacy key is retained for format2/3 compatibility.
         // Shared format4/5 uses all eight drawing-key bytes for both features.
         [SerializeField, HideInInspector] private string meshDrawingKeyHex = "";
-
-        [Tooltip("メッシュ暗号化とテクスチャ暗号化で64bitの解錠鍵を共通化します。同期する鍵を1本に減らします。OFFは従来の独立したテクスチャ鍵を使います。変更後は再ビルド・再アップロードしてください。")]
-        [SerializeField] private bool shareMeshAndTextureKey = true;
 
         [Tooltip("ON: OSCで鍵を1回送信するとVRChatのパラメーターに保存し、次回以降は自動で復元します。推奨設定です。\n" +
                  "OFF: VRChatを起動するたびに、AntiRippingClientからOSCで鍵を送る必要があります。より安全です。")]
@@ -173,7 +170,7 @@ namespace AjisaiFlow.AntiRipping
         [SerializeField] private string meshLockKeyHex = "";
 
         [Tooltip("解錠用のOSCパラメーター名8個。鍵の生成時に16文字のランダムな16進数で名前を付けます。\n" +
-                 "メッシュ暗号化ではOSC入力を同期しないIntで保持し、2つの同期Intへ分割して他の人へ送信します。従来方式のローカル鍵入力は変わりません。\n" +
+                 "メッシュ暗号化またはテクスチャ暗号化ではOSC入力を同期しないIntで保持し、2つの同期Intへ分割して他の人へ送信します。従来方式のローカル鍵入力は変わりません。\n" +
                  "解錠には鍵の値と送信先アドレスの両方が必要です。保存済みのOSC名は変更しません。")]
         [SerializeField] private string[] meshLockParamNames = new string[0];
 
@@ -182,7 +179,7 @@ namespace AjisaiFlow.AntiRipping
                  "Animator Layer 2 (ForceLock) がBlendShapeのウェイトを0に上書きします。")]
         [SerializeField] private string meshLockNowParamName = "";
 
-        [Tooltip("メッシュ暗号化では、鍵を分割同期する2つのIntチャンネルの1つです。受信前の初期値は0です。\n" +
+        [Tooltip("メッシュ暗号化またはテクスチャ暗号化では、鍵を分割同期する2つのIntチャンネルの1つです。受信前の初期値は0です。\n" +
                  "従来方式では解錠状態を他の人へ送る同期Floatです。鍵そのものはこのFloatに含めません。\n" +
                  "どちらの方式でも、このパラメーターの同期予算は8bitです。")]
         [SerializeField] private string meshLockBroadcastParamName = "";
@@ -207,18 +204,18 @@ namespace AjisaiFlow.AntiRipping
                  "Direct Blend TreeのDirect Blend Paramに指定し、8個の子をすべて有効にします。")]
         [SerializeField] private string meshLockOneParamName = "";
 
-        [Tooltip("メッシュ暗号化では、各クライアント内の0/1表示ヒントを保持する、同期しないFloatパラメーター名です。\n" +
+        [Tooltip("メッシュ暗号化またはテクスチャ暗号化では、各クライアント内の0/1表示ヒントを保持する、同期しないFloatパラメーター名です。\n" +
                  "所有者はローカル入力に応じて更新し、受信側は全鍵の分割同期が完了してから更新します。\n" +
                  "従来方式では1 - Broadcastを計算するAAP用Floatで、初期値は1.0です。鍵の生成時にランダムな名前を付けます。")]
         [SerializeField] private string meshLockInvBroadcastParamName = "";
 
-        [Tooltip("メッシュ暗号化では、鍵を分割同期する2つ目のIntチャンネルです。受信前の初期値は0です。\n" +
+        [Tooltip("メッシュ暗号化またはテクスチャ暗号化では、鍵を分割同期する2つ目のIntチャンネルです。受信前の初期値は0です。\n" +
                  "初回は0.1秒間隔で分割した鍵を高速送信し、その後は1秒間隔で再送します。他の人の画面では全鍵が揃ってから一括で反映します。\n" +
                  "従来方式では、解錠中に所有者が数秒おきに切り替える同期Floatです。途中参加した人にも解錠状態が届くよう再送を促します。")]
         [SerializeField] private string meshLockHeartbeatParamName = "";
 
-        [Tooltip("独立鍵の互換設定で使うテクスチャ復号鍵TK0..3のOSC/Animatorパラメーター名4個です。鍵の生成時に16文字のランダムな16進数で名前を付け、解錠鍵の下位4byteを受け取ります。共通鍵モードはK0..7を使います。\n" +
-                 "メッシュ暗号化では同期しないIntで保持し、2チャンネルの分割同期に含めます。従来方式では4つの同期Intで送ります。\n" +
+        [Tooltip("旧32bitテクスチャ形式との互換性を保つための、TK0..3のOSC/Animatorパラメーター名4個です。新しいテクスチャ暗号化は、単独使用でも64bit鍵のK0..7を使います。\n" +
+                 "旧32bit形式では4つの同期Intで送ります。\n" +
                  "名前が未生成の旧データでは固定名_AjisaiAR_TK0..3を使い、保存済みのOSC名は変更しません。")]
         [SerializeField] private string[] meshLockTextureKeyParamNames = new string[0];
 
@@ -288,9 +285,9 @@ namespace AjisaiFlow.AntiRipping
 
         // ────────────────────────────── Texture Pixel Encryption (v0.31) ──────────────────────────────
 
-        [Tooltip("対応シェーダーの主要テクスチャを暗号化し、AssetBundle内のテクスチャをノイズ化します。正しい鍵が送られたときだけアバター内部で復号して表示します。抜き取った画像はノイズにしか見えません (既定ON)。\n" +
+        [Tooltip("対応シェーダーの主要テクスチャを64bit鍵で暗号化し、AssetBundle内のテクスチャをノイズ化します。正しい鍵が送られたときだけアバター内部で復号して表示します。抜き取った画像はノイズにしか見えません (既定ON)。\n" +
                  "対応はlilToonと、読み取り方をソースから確認できるPoiyomiの材質テクスチャです。Poiyomiは旧版もバージョンで制限しません。新たに対応した用途は既定OFFです。「暗号化するテクスチャの種類」で選択して有効にします。1メッシュに複数マテリアルがある場合やセーフティ表示中はノイズのまま表示されます (仕様)。\n" +
-                 "テクスチャ暗号化でダウンロード容量が増えることがあります。「圧縮したまま暗号化する」に対応する画像は展開後の容量を減らせますが、ダウンロード容量は画像と形式によって変わります。容量はビルド時に見積もり、上限を超えそうなら警告し、確実に超える場合はアップロードを止めます。")]
+                 "テクスチャ単独でも同期予算は16bitで、メッシュ暗号化と併用すると同じ64bit鍵を使います。テクスチャ暗号化でダウンロード容量が増えることがあります。「圧縮したまま暗号化する」に対応する画像は展開後の容量を減らせますが、ダウンロード容量は画像と形式によって変わります。容量はビルド時に見積もり、上限を超えそうなら警告し、確実に超える場合はアップロードを止めます。")]
         [SerializeField] private bool enableTexturePixelEncryption = true;
 
         [Tooltip("テクスチャ暗号化がONのとき、メインの色テクスチャ (_MainTex) を暗号化します。透明部分の縁を保つため、不透明度は変更しません。")]
@@ -547,7 +544,7 @@ namespace AjisaiFlow.AntiRipping
         // を省略 → cache hit で compile を数分単位に短縮する。 旧ファイルは GeneratedShaderSweepPass が
         // version sentinel ベースで掃除する (同 version は全保持)。
         // trade-off: locked shader file が disk に残るため attacker が shader 構造を解析可能になる
-        // (ただし texture 復号には実行時の _AR_TK (共有時8byte、独立鍵時4byte) が必要で、shader 抽出だけでは
+        // (ただし texture 復号には実行時の _AR_TK (新形式8byte、旧形式4byte) が必要で、shader 抽出だけでは
         // texture 復号は不可)。 解析耐性を最大化したい配布時は OFF にできる (任意)。
         [Tooltip("生成したシェーダーをビルド後も保持し、2回目以降のビルドを高速化します。初期設定はONです。マテリアルが多いアバターでは、数十分かかるビルドが数分に短縮されます。\n" +
                  "保護シェーダーがプロジェクト内に残るため、解析者がシェーダーの構造を見る可能性があります。テクスチャの復号には別途解錠が必要で、シェーダーだけでは復号できません。\n" +
@@ -574,25 +571,24 @@ namespace AjisaiFlow.AntiRipping
 
         public bool EnableMeshLock => enableMeshLock;
         public bool MeshKeyEncryption => enableMeshLock && meshKeyEncryption;
-        public bool UseSharedEncryptionKey => MeshKeyEncryption && EnableTexturePixelEncryption && shareMeshAndTextureKey;
+        public bool UseSharedEncryptionKey => MeshKeyEncryption && EnableTexturePixelEncryption;
+        public bool UsesPackedKeyTransport => MeshKeyEncryption || EnableTexturePixelEncryption;
         public string MeshDrawingKeyHex => meshDrawingKeyHex ?? "";
-        public bool HasMeshDrawingKey
+        public bool HasMeshDrawingKey => IsValidEncryptionKeyHex(meshDrawingKeyHex);
+
+        private static bool IsValidEncryptionKeyHex(string hex)
         {
-            get
+            if (hex == null || hex.Length != KeyByteCount * 2) return false;
+            bool nonZero = false;
+            foreach (char c in hex)
             {
-                var hex = MeshDrawingKeyHex;
-                if (hex.Length != KeyByteCount * 2) return false;
-                bool nonZero = false;
-                foreach (char c in hex)
-                {
-                    bool digit = c >= '0' && c <= '9';
-                    bool lower = c >= 'a' && c <= 'f';
-                    bool upper = c >= 'A' && c <= 'F';
-                    if (!digit && !lower && !upper) return false;
-                    nonZero |= c != '0';
-                }
-                return nonZero;
+                bool digit = c >= '0' && c <= '9';
+                bool lower = c >= 'a' && c <= 'f';
+                bool upper = c >= 'A' && c <= 'F';
+                if (!digit && !lower && !upper) return false;
+                nonZero |= c != '0';
             }
+            return nonZero;
         }
         // v0.49: メッシュ崩しの強さは 0.1m 固定 (設定 UI から撤去)。 旧 meshLockScrambleRadius 直列化フィールドは廃止。
         //   MeshLockPass の BlendShape 頂点 scramble 半径 / ShaderLockPass の UV displacement magnitude (×2.0) の基準値。
@@ -601,12 +597,12 @@ namespace AjisaiFlow.AntiRipping
         public bool AutoExcludeSpsDpsFromMeshLock => autoExcludeSpsDpsFromMeshLock;
         public bool AutoExcludePlugFromShaderLock => autoExcludePlugFromShaderLock;
         public string MeshLockKeyHex => meshLockKeyHex;
-        // v0.9: 16 文字 hex (8 byte / 64 bit)。旧形式 (8 文字 hex / 32 bit) は無効扱い → 再生成必要
-        public bool HasMeshLockKey => !string.IsNullOrEmpty(meshLockKeyHex) && meshLockKeyHex.Length == 16;
+        // Saved keys are sixteen hex digits and must not be all zero.
+        public bool HasMeshLockKey => IsValidEncryptionKeyHex(meshLockKeyHex);
         public const int KeyByteCount = 8;
 
         /// <summary>
-        /// テクスチャ復号鍵 TK の byte 数。 PackKeyBytes が下位 4 byte を使うため 4 (= K0..K3 に対応)。
+        /// 旧32bitテクスチャ形式の鍵 TK の byte 数。互換APIの PackKeyBytes は下位4 byteを使う。
         /// </summary>
         public const int TextureKeyByteCount = 4;
 
@@ -939,8 +935,8 @@ namespace AjisaiFlow.AntiRipping
 
         public string GetBroadcastParamName() => HasMeshLockBroadcastParamName ? meshLockBroadcastParamName : "_AjisaiAR_Unlocked";
 
-        /// <summary>表示状態の入力。メッシュ暗号化はローカルInvBroadcastの0/1ヒント、従来方式は同期Broadcastを使う。</summary>
-        public string GetDisplayStateParamName() => MeshKeyEncryption ? GetInvBroadcastParamName() : GetBroadcastParamName();
+        /// <summary>表示状態の入力。分割同期ではローカルInvBroadcastの0/1ヒント、従来方式は同期Broadcastを使う。</summary>
+        public string GetDisplayStateParamName() => UsesPackedKeyTransport ? GetInvBroadcastParamName() : GetBroadcastParamName();
 
         public string GetUnlockBlendShapeName() => HasMeshLockUnlockBlendShapeName ? meshLockUnlockBlendShapeName : "_AjisaiAR_Unlock";
 
@@ -951,7 +947,7 @@ namespace AjisaiFlow.AntiRipping
         public string GetInvBroadcastParamName() =>
             string.IsNullOrEmpty(meshLockInvBroadcastParamName) ? "_AjisaiAR_InvBroadcast" : meshLockInvBroadcastParamName;
 
-        // メッシュ暗号化では分割同期Intの2ch目、従来方式では再送用Float。旧名は維持する。
+        // メッシュ/テクスチャ暗号化では分割同期Intの2ch目、従来方式では再送用Float。旧名は維持する。
         public string GetHeartbeatParamName() =>
             string.IsNullOrEmpty(meshLockHeartbeatParamName) ? "_AjisaiAR_Heartbeat" : meshLockHeartbeatParamName;
 
@@ -962,7 +958,7 @@ namespace AjisaiFlow.AntiRipping
             && meshLockTextureKeyParamNames.Length == TextureKeyByteCount
             && System.Array.TrueForAll(meshLockTextureKeyParamNames, n => !string.IsNullOrEmpty(n));
 
-        // テクスチャ鍵TK_iのOSC名。メッシュ暗号化ではlocal Int、従来方式ではsynced Int。
+        // 旧32bitテクスチャ形式用TK_iのOSC名。新規ビルドは64bitのK0..7を使う。
         public string GetTextureKeyParamName(int index)
         {
             if (index < 0 || index >= TextureKeyByteCount) return null;
@@ -1070,6 +1066,20 @@ namespace AjisaiFlow.AntiRipping
             {
                 return new byte[KeyByteCount];
             }
+        }
+
+        /// <summary>Master for new texture ciphertext. Invalid saved keys cannot become a zero-key ciphertext.</summary>
+        public byte[] GetTextureEncryptionKeyBytes()
+        {
+            if (MeshKeyEncryption)
+            {
+                if (!HasMeshDrawingKey)
+                    throw new System.InvalidOperationException("Texture encryption requires a valid non-zero drawing key.");
+                return GetMeshDrawingKeyBytes();
+            }
+            if (!HasMeshLockKey)
+                throw new System.InvalidOperationException("Texture encryption requires a valid non-zero master key.");
+            return GetMeshLockKeyBytes();
         }
 
         /// <summary>Drawing/shared master key, never derived from the legacy texture key.</summary>

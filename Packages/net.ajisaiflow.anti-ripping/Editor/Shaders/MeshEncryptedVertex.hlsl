@@ -77,7 +77,7 @@ bool ARMeshDecodeVertex(uint vertexID, inout float4 position, inout float3 norma
     uint vertices = (uint)round(_AR_MeshInfo.x), bones = (uint)round(_AR_MeshInfo.y);
     uint shapes = (uint)round(_AR_MeshInfo.z);
     uint2 metaSize = (uint2)_AR_MeshMetaSize.xy, cipherSize = (uint2)_AR_MeshCipherSize.xy;
-    if (vertexID >= vertices || bones == 0u || bones > 512u || shapes > 512u ||
+    if (vertexID >= vertices || bones == 0u || bones > 512u || shapes > ARMP_MAX_SHAPES ||
         _AR_MeshInfo.w != 1 || any(metaSize == 0u) || any(cipherSize == 0u)) return false;
     float4 lo = float4(_AR_MK0, _AR_MK1, _AR_MK2, _AR_MK3);
     float4 hi = float4(_AR_MK4, _AR_MK5, _AR_MK6, _AR_MK7);

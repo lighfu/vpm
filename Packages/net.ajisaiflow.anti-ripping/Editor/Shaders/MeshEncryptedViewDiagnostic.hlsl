@@ -49,7 +49,7 @@ uint ARVDLayoutFailure(uint2 original, uint originalSlices)
     float2 touches = float2(_AR_PaletteTouch0, _AR_PaletteTouch1);
     if (!all(ARMPFinite(touches)) || any(touches < 0) || any(touches > 1)) return 4u;
     if (!all(ARMPFinite(_AR_MeshInfo)) || _AR_MeshInfo.w != 1 || any(_AR_MeshInfo.xyz < 0) ||
-        _AR_MeshInfo.x <= 0 || _AR_MeshInfo.y <= 0 || _AR_MeshInfo.y > 512 || _AR_MeshInfo.z > 512) return 5u;
+        _AR_MeshInfo.x <= 0 || _AR_MeshInfo.y <= 0 || _AR_MeshInfo.y > 512 || _AR_MeshInfo.z > ARMP_MAX_SHAPES) return 5u;
     if (ARMPSlotCount() == 0u) return 6u;
     if (ARMP_TILE_SIZE + ARMPPayloadWords() * 3u > ARMP_TILE_SIZE * ARMP_TILE_SIZE) return 7u;
     return ARMPLayoutFits() ? 0u : 8u;

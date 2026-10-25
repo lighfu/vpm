@@ -8,6 +8,10 @@
 #define ARMP_HEADER_WORDS 8u
 #define ARMP_BONE_WORDS 13u
 #define ARMP_SHAPE_WORDS 2u
+// Three pixels encode each word; the first tile row is reserved. This bound
+// keeps public shape counts safe before the combined bone/morph size check.
+#define ARMP_PAYLOAD_WORD_CAPACITY ((ARMP_TILE_SIZE * ARMP_TILE_SIZE - ARMP_TILE_SIZE) / 3u)
+#define ARMP_MAX_SHAPES ((ARMP_PAYLOAD_WORD_CAPACITY - ARMP_HEADER_WORDS) / ARMP_SHAPE_WORDS)
 #define ARMP_MAX_PROBES 8u
 #define ARMP_NO_SLOT 0xffffffffu
 
@@ -132,7 +136,7 @@ bool ARMPLayoutFits()
     if (!all(ARMPFinite(publicValues)) || any(publicValues < 0.0) || any(publicValues > 1.0)) return false;
     return _AR_MeshInfo.w == 1.0 && _AR_MeshInfo.x > 0.0 && _AR_MeshInfo.y > 0.0 &&
         all(ARMPFinite(_AR_MeshInfo)) && all(_AR_MeshInfo.xyz >= 0.0) &&
-        _AR_MeshInfo.y <= 512.0 && _AR_MeshInfo.z <= 512.0 && ARMPSlotCount() > 0u &&
+        _AR_MeshInfo.y <= 512.0 && _AR_MeshInfo.z <= ARMP_MAX_SHAPES && ARMPSlotCount() > 0u &&
         ARMP_TILE_SIZE + ARMPPayloadWords() * 3u <= ARMP_TILE_SIZE * ARMP_TILE_SIZE;
 }
 float4 ARMPPixelClip(float2 pixel) { return float4(pixel / float2(ARMPScreenSize()) * 2.0 - 1.0, 0.5, 1.0); }
